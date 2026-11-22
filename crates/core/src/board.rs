@@ -36,6 +36,15 @@ pub struct ProgramProfile {
     pub index_chain: Option<u32>,
 }
 
+/// Package pins a design must never use, e.g. I/O pins the board wires
+/// straight to a supply rail (driving one low would short the rail).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReservedPins {
+    pub pins: Vec<String>,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Board {
@@ -58,6 +67,9 @@ pub struct Board {
     /// replaces the one fpgaflow picks from the program mode.
     #[serde(default)]
     pub bitgen: Vec<String>,
+    /// Pins `fpgaflow build` refuses to let a design use.
+    #[serde(default)]
+    pub reserved: Vec<ReservedPins>,
 }
 
 /// Master constraint files shipped in `data/`, compiled in so a new
@@ -82,6 +94,21 @@ impl Board {
     /// File name for the board's UCF inside a project (`constraints/<id>.ucf`).
     pub fn ucf_file_name(&self) -> String {
         format!("{}.ucf", self.id)
+    }
+
+    /// Why `pin` must not be used on this board, if it is reserved.
+    pub fn reserved_reason(&self, pin: &str) -> Option<&str> {
+        self.reserved
+            .iter()
+            .find(|r| r.pins.iter().any(|p| p.eq_ignore_ascii_case(pin)))
+            .map(|r| r.reason.as_str())
+    }
+
+    /// Every reserved pin.
+    pub fn reserved_pins(&self) -> impl Iterator<Item = &str> {
+        self.reserved
+            .iter()
+            .flat_map(|r| r.pins.iter().map(String::as_str))
     }
 
     /// Does this board's programmer use USB `vid:pid`?
@@ -128,6 +155,14 @@ mod tests {
                     b.id
                 );
             }
+            let ucf = b.ucf_text().unwrap_or_default();
+            for pin in b.reserved_pins() {
+                assert!(
+                    !ucf.contains(&format!("LOC = \"{pin}\"")),
+                    "{}: master UCF uses reserved pin {pin}",
+                    b.id
+                );
+            }
             assert!(
                 b.ucf_text().is_some(),
                 "{}: UCF {} not compiled in",
@@ -165,6 +200,9 @@ mod tests {
         assert!(b.bitgen.iter().any(|g| g == "StartupClk:Cclk"));
         let ucf = b.ucf_text().unwrap();
         assert!(ucf.contains(r#"NET "CLK_48MHZ" LOC = "P10""#));
+        assert_eq!(b.reserved_pins().count(), 14);
+        assert!(b.reserved_reason("a8").is_some());
+        assert!(b.reserved_reason("D2").is_none());
         assert!(ucf.contains(r#"NET "LED<0>" LOC = "D2""#));
     }
 }

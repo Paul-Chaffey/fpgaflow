@@ -8,6 +8,8 @@
 # program.index_chain  position of the FPGA in the JTAG chain
 # usb                  VID:PID pairs that mean the board is connected
 # bitgen               extra ISE bitgen -g options; a StartupClk here wins
+# reserved             pins a design must never use (fpgaflow build refuses
+#                      them and tells ISE to PROHIBIT them), with the reason
 
 [[board]]
 id = "s3an-starter"
@@ -61,3 +63,14 @@ bitgen = [
 # (FPGA alone on the chain, manual 3.19) is an alternative with a cable.
 [board.program]
 method = "celoxica"
+# I/O pins the RC10 wires straight to a supply (schematic sheet 3): driving
+# one low would short the rail. Celoxica's PSL library lists the same pins.
+[[board.reserved]]
+pins = ["A8", "C8", "D8", "E8", "F8"]
+reason = "wired to bank 0's VCCO (VccADC, 1.2 V)"
+[[board.reserved]]
+pins = ["J13"]
+reason = "wired to ATAv (banks 1/2 VCCO, 3.3 V via JP2)"
+[[board.reserved]]
+pins = ["E4", "F5", "G1", "J5", "J6", "K5", "K6", "M18"]
+reason = "wired to +2.5 V"

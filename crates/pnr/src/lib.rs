@@ -33,6 +33,13 @@ pub enum PnrError {
         .0.join(", ")
     )]
     Unconstrained(Vec<String>),
+    #[error(
+        "the constraints put {} signal(s) on pins the {board} reserves; they can never be \
+         used: {}",
+        .uses.len(),
+        .uses.join("; ")
+    )]
+    ReservedPins { board: String, uses: Vec<String> },
     #[error("cannot read {path}: {source}")]
     Io {
         path: PathBuf,
@@ -65,9 +72,75 @@ pub fn constraint_files(project: &Project) -> Vec<PathBuf> {
         .unwrap_or_default()
 }
 
+/// The project's board profile, if `[target] board` names a known one.
+pub fn project_board(project: &Project) -> Option<&'static fpgaflow_core::board::Board> {
+    project
+        .file
+        .target
+        .as_ref()
+        .and_then(|t| t.board.as_deref())
+        .and_then(fpgaflow_core::board::board)
+}
+
+/// Refuse constraints that `LOC` a signal onto a pin the board reserves
+/// (e.g. an I/O pin wired straight to a supply rail).
+pub fn check_reserved_pins(project: &Project) -> Result<(), PnrError> {
+    let Some(b) = project_board(project) else {
+        return Ok(());
+    };
+    let mut uses = Vec::new();
+    for f in constraint_files(project) {
+        let text = std::fs::read_to_string(&f).map_err(|source| PnrError::Io {
+            path: f.clone(),
+            source,
+        })?;
+        for l in constraints::ucf_pin_locs(&text) {
+            if let Some(why) = b.reserved_reason(&l.pin) {
+                uses.push(format!(
+                    "{} on {} at {}:{} ({why})",
+                    l.net,
+                    l.pin,
+                    f.strip_prefix(&project.root).unwrap_or(&f).display(),
+                    l.line
+                ));
+            }
+        }
+    }
+    if uses.is_empty() {
+        Ok(())
+    } else {
+        Err(PnrError::ReservedPins {
+            board: b.name.clone(),
+            uses,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reserved_pins_are_refused_with_file_and_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut f = fpgaflow_core::project::ProjectFile::new("t");
+        f.target = Some(TargetSection {
+            board: Some("rc10".into()),
+            constraints: vec!["c.ucf".into()],
+            ..Default::default()
+        });
+        let p = Project::create(dir.path(), f).unwrap();
+        std::fs::write(dir.path().join("c.ucf"), "NET \"led\" LOC = \"D2\";\n").unwrap();
+        assert!(check_reserved_pins(&p).is_ok());
+        std::fs::write(
+            dir.path().join("c.ucf"),
+            "NET \"led\" LOC = \"D2\";\nNET \"x\" LOC = \"K6\";\n",
+        )
+        .unwrap();
+        let e = check_reserved_pins(&p).unwrap_err().to_string();
+        assert!(e.contains("x on K6 at c.ucf:2 (wired to +2.5 V)"), "{e}");
+        assert!(!e.contains("D2"), "{e}");
+    }
 
     #[test]
     fn part_name_needs_all_three() {

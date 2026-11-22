@@ -154,6 +154,21 @@ pub fn plan_implement(
             ucf.push('\n');
         }
     }
+    // Pins the board reserves: ISE must never place anything there either.
+    if let Some(b) = crate::project_board(project) {
+        if b.reserved_pins().next().is_some() {
+            ucf.push_str(&format!(
+                "\n# ---- {}: reserved pins (data/boards.toml)\n",
+                b.name
+            ));
+            for pin in b.reserved_pins() {
+                ucf.push_str(&format!(
+                    "CONFIG PROHIBIT = \"{pin}\"; # {}\n",
+                    b.reserved_reason(pin).unwrap_or("")
+                ));
+            }
+        }
+    }
 
     let files = IseFiles::new(project.stage_dir("impl"), top);
     let w = &files.workdir;

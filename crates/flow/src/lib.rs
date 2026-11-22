@@ -219,7 +219,9 @@ pub async fn build(
         return Err(PnrError::NotImplemented(target.backend.id.clone()).into());
     }
 
-    // 1. Every top-level port bit needs a LOC before anything is built.
+    // 1. No signal on a pin the board reserves (e.g. wired to a supply), and
+    //    every top-level port bit needs a LOC, before anything is built.
+    fpgaflow_pnr::check_reserved_pins(project)?;
     let design = analyse(project, cfg, None)?;
     let (top, missing) = unconstrained_ports(project, &design)?;
     if !missing.is_empty() {

@@ -60,6 +60,8 @@ themselves: an unconstrained pin can drive a net wired to something else on
 the board. `examples/blinky/constraints/s3an-starter.ucf` and the master
 `data/boards/s3an-starter.ucf` use the pin constraints printed in AMD's UG334.
 
+It also refuses, with no override, any `LOC` on a pin the board profile reserves: on the Celoxica RC10 that is the 14 I/O pins wired straight to a supply rail, where driving the pin low would short the rail. The error names the file and line, and the generated UCF tells ISE to `PROHIBIT` those pins too.
+
 **Verified on hardware:**
 - Spartan-3AN Starter Kit: blinky built with Yosys and ISE, loaded with
   openFPGALoader over the board's embedded Xilinx USB cable. LED0 blinks and
