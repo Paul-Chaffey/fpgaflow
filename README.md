@@ -74,7 +74,8 @@ are next.
    `sudo cp data/udev/60-fpgaflow-xilinx.rules /etc/udev/rules.d/ && sudo udevadm control --reload-rules`.
    openFPGALoader's own rules have no entry for Xilinx cables (USB vendor `03fd`).
 3. **openFPGALoader with the XC3S700AN entry:** `scripts/build-openfpgaloader.sh`
-   (stock v1.2.0 reads the IDCODE but has no part entry for it). openFPGALoader
+   (stock v1.2.0 reads the IDCODE but has no part entry for it; submitted
+   upstream as [openFPGALoader#771](https://github.com/trabucayre/openFPGALoader/pull/771)). openFPGALoader
    loads the cable's FX2 firmware (`xusb_emb.hex` from ISE) itself; the cable
    then re-enumerates from `03fd:000d` to `03fd:0008`.
 4. `fpgaflow build && fpgaflow program`. The JTAG clock is 750 kHz: at 6 MHz

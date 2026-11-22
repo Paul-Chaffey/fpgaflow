@@ -6,6 +6,10 @@
 # so the only build dependency beyond a C++ compiler and CMake is libusb-1.0.
 # Enable more cables/vendors by dropping the -DENABLE_*_ALL=OFF switches
 # (they need libftdi1 and hidapi development packages).
+#
+# Submitted upstream: https://github.com/trabucayre/openFPGALoader/pull/771
+# Once a release includes it, the stock openFPGALoader works and this
+# script is no longer needed.
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
