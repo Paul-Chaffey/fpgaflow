@@ -9,6 +9,7 @@ use fpgaflow_core::{tools, UserConfig};
 use fpgaflow_hdl::design::{self, AnalyseRequest};
 use fpgaflow_hdl::Severity;
 use fpgaflow_sim::{gtkwave, Plan, Summary, Verdict};
+use fpgaflow_synth::report::Utilisation;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -107,7 +108,7 @@ pub fn sim(dir: &Path, cfg: &UserConfig, tool: Option<&str>, waves: bool) -> Res
         }
         _ => {}
     }
-    if let Some(w) = &s.wave {
+    if let Some(w) = s.outputs.first() {
         eprintln!("waveform: {}", fpgaflow_sim::rel(&project, w).display());
         if waves {
             open_waves(&project, cfg, tool, w)?;
@@ -187,6 +188,91 @@ pub fn hier(dir: &Path, cfg: &UserConfig, top: Option<String>) -> Result<()> {
         if !m.children.is_empty() {
             println!("    instantiates: {}", m.children.join(", "));
         }
+    }
+    Ok(())
+}
+
+pub fn synth(
+    dir: &Path,
+    cfg: &UserConfig,
+    family: Option<&str>,
+    backend: Option<&str>,
+) -> Result<()> {
+    let project = Project::find(dir)?;
+    let target = fpgaflow_synth::resolve_target(&project, family, backend)?;
+    eprintln!(
+        "Target: {} ({}), backend {} -> {} netlist",
+        target.family.name,
+        target.family.id,
+        target.backend.name,
+        target.backend.netlist.extension()
+    );
+    if let Some(why) = &target.family.experimental {
+        eprintln!("note: {why}; check the result carefully.");
+    }
+    let sp = fpgaflow_synth::plan_synth(&project, cfg, target)?;
+    let s = run_plan(&sp.plan)?;
+    report(&project, &s);
+    if !s.ok {
+        eprintln!(
+            "full log: {}",
+            fpgaflow_sim::rel(&project, &sp.log).display()
+        );
+        bail!("synthesis failed");
+    }
+    let u = Utilisation::from_stat_json(&std::fs::read_to_string(&sp.stat)?)?;
+    println!("\nUtilisation ({} cells)", u.cells);
+    for (cat, n) in &u.by_category {
+        println!("  {:<18} {n:>8}", cat.label());
+    }
+    println!("\nBy primitive");
+    for (cell, n) in &u.by_type {
+        println!("  {cell:<18} {n:>8}");
+    }
+    println!(
+        "\nnetlist: {}",
+        fpgaflow_sim::rel(&project, &sp.netlist).display()
+    );
+    println!(
+        "log:     {}",
+        fpgaflow_sim::rel(&project, &sp.log).display()
+    );
+    Ok(())
+}
+
+pub fn families() -> Result<()> {
+    use fpgaflow_core::family;
+    println!(
+        "{:<14} {:<26} {:<11} NAME",
+        "FAMILY", "BACKENDS", "CONSTRAINTS"
+    );
+    for f in family::families() {
+        let flag = if f.experimental.is_some() {
+            "  [experimental]"
+        } else {
+            ""
+        };
+        println!(
+            "{:<14} {:<26} {:<11} {}{flag}",
+            f.id,
+            f.backends.join(", "),
+            f.constraints,
+            f.name
+        );
+    }
+    println!("\nBackends:");
+    for b in family::backends() {
+        let kind = if b.open_source {
+            "open source"
+        } else {
+            "vendor tool"
+        };
+        println!(
+            "  {:<10} {:<18} {} netlist, {kind}",
+            b.id,
+            b.name,
+            b.netlist.extension()
+        );
     }
     Ok(())
 }

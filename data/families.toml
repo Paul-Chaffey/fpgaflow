@@ -1,0 +1,298 @@
+# FPGA families fpgaflow knows how to synthesise, and the P&R backends for each.
+#
+# yosys:       the Yosys synthesis command and its family arguments
+# top_flag:    the command accepts -top (synth_ecp5 / synth_nexus do not)
+# flatten:     how the command handles hierarchy:
+#                "flag"    flattens only with -flatten (synth_xilinx, synth)
+#                "default" flattens unless given -noflatten
+#                "fixed"   has neither option
+# backends:    P&R backends in order of preference; the first is the default
+# constraints: physical constraint file format
+#
+# Options were checked against `yosys -h <cmd>` from Yosys 0.71, and every
+# family synthesises examples/blinky with it.
+
+[[backend]]
+id = "nextpnr"
+name = "nextpnr"
+netlist = "json"
+open_source = true
+
+[[backend]]
+id = "vpr"
+name = "VTR / VPR"
+netlist = "eblif"
+open_source = true
+
+[[backend]]
+id = "ise"
+name = "Xilinx ISE 14.7"
+netlist = "edif"
+open_source = false
+
+[[backend]]
+id = "vivado"
+name = "AMD Vivado"
+netlist = "edif"
+open_source = false
+
+[[backend]]
+id = "quartus"
+name = "Intel Quartus"
+netlist = "vqm"
+open_source = false
+
+[[backend]]
+id = "efinity"
+name = "Efinix Efinity"
+netlist = "edif"
+open_source = false
+
+# ---------------------------------------------------------------- Lattice
+[[family]]
+id = "ice40"
+name = "Lattice iCE40"
+vendor = "lattice"
+yosys = "synth_ice40"
+top_flag = true
+flatten = "default"
+backends = ["nextpnr", "vpr"]
+constraints = "pcf"
+
+[[family]]
+id = "ecp5"
+name = "Lattice ECP5"
+vendor = "lattice"
+yosys = "synth_ecp5"
+top_flag = false
+flatten = "fixed"
+backends = ["nextpnr"]
+constraints = "lpf"
+
+[[family]]
+id = "nexus"
+name = "Lattice Nexus (CrossLink-NX, Certus-NX)"
+vendor = "lattice"
+yosys = "synth_nexus"
+top_flag = false
+flatten = "fixed"
+backends = ["nextpnr"]
+constraints = "pdc"
+
+# ---------------------------------------------------------------- Gowin
+[[family]]
+id = "gw1n"
+name = "Gowin GW1N (LittleBee)"
+vendor = "gowin"
+yosys = "synth_gowin -family gw1n"
+top_flag = true
+flatten = "default"
+backends = ["nextpnr"]
+constraints = "cst"
+
+[[family]]
+id = "gw2a"
+name = "Gowin GW2A (Arora)"
+vendor = "gowin"
+yosys = "synth_gowin -family gw2a"
+top_flag = true
+flatten = "default"
+backends = ["nextpnr"]
+constraints = "cst"
+
+[[family]]
+id = "gw5a"
+name = "Gowin GW5A (Arora V)"
+vendor = "gowin"
+yosys = "synth_gowin -family gw5a"
+top_flag = true
+flatten = "default"
+backends = ["nextpnr"]
+constraints = "cst"
+
+# ---------------------------------------------------------------- AMD / Xilinx
+[[family]]
+id = "xc7"
+name = "AMD/Xilinx 7-series (Spartan-7, Artix-7, Kintex-7, Zynq-7000)"
+vendor = "xilinx"
+yosys = "synth_xilinx -family xc7"
+top_flag = true
+flatten = "flag"
+backends = ["vpr", "nextpnr", "vivado"]
+constraints = "xdc"
+
+[[family]]
+id = "xcup"
+name = "AMD/Xilinx UltraScale+"
+vendor = "xilinx"
+yosys = "synth_xilinx -family xcup"
+top_flag = true
+flatten = "flag"
+backends = ["vivado"]
+constraints = "xdc"
+
+[[family]]
+id = "xcu"
+name = "AMD/Xilinx UltraScale"
+vendor = "xilinx"
+yosys = "synth_xilinx -family xcu"
+top_flag = true
+flatten = "flag"
+backends = ["vivado"]
+constraints = "xdc"
+
+[[family]]
+id = "spartan6"
+name = "AMD/Xilinx Spartan-6"
+vendor = "xilinx"
+yosys = "synth_xilinx -family xc6s -ise"
+top_flag = true
+flatten = "flag"
+backends = ["ise"]
+constraints = "ucf"
+
+[[family]]
+id = "virtex6"
+name = "AMD/Xilinx Virtex-6"
+vendor = "xilinx"
+yosys = "synth_xilinx -family xc6v -ise"
+top_flag = true
+flatten = "flag"
+backends = ["ise"]
+constraints = "ucf"
+
+[[family]]
+id = "spartan3a"
+name = "AMD/Xilinx Spartan-3A / Spartan-3AN"
+vendor = "xilinx"
+yosys = "synth_xilinx -family xc3sa -ise"
+top_flag = true
+flatten = "flag"
+backends = ["ise"]
+constraints = "ucf"
+experimental = "Yosys marks Spartan-3A support as EXPERIMENTAL"
+
+[[family]]
+id = "spartan3adsp"
+name = "AMD/Xilinx Spartan-3A DSP"
+vendor = "xilinx"
+yosys = "synth_xilinx -family xc3sda -ise"
+top_flag = true
+flatten = "flag"
+backends = ["ise"]
+constraints = "ucf"
+experimental = "Yosys marks Spartan-3A DSP support as EXPERIMENTAL"
+
+[[family]]
+id = "spartan3e"
+name = "AMD/Xilinx Spartan-3E"
+vendor = "xilinx"
+yosys = "synth_xilinx -family xc3se -ise"
+top_flag = true
+flatten = "flag"
+backends = ["ise"]
+constraints = "ucf"
+experimental = "Yosys marks Spartan-3E support as EXPERIMENTAL"
+
+[[family]]
+id = "spartan3"
+name = "AMD/Xilinx Spartan-3"
+vendor = "xilinx"
+yosys = "synth_xilinx -family xc3s -ise"
+top_flag = true
+flatten = "flag"
+backends = ["ise"]
+constraints = "ucf"
+experimental = "Yosys marks Spartan-3 support as EXPERIMENTAL"
+
+# ---------------------------------------------------------------- Intel / Altera
+[[family]]
+id = "cyclonev"
+name = "Intel/Altera Cyclone V"
+vendor = "intel"
+yosys = "synth_intel_alm -family cyclonev"
+top_flag = true
+flatten = "default"
+backends = ["nextpnr", "quartus"]
+constraints = "qsf"
+
+[[family]]
+id = "max10"
+name = "Intel/Altera MAX 10"
+vendor = "intel"
+yosys = "synth_intel -family max10"
+top_flag = true
+flatten = "default"
+backends = ["quartus"]
+constraints = "qsf"
+
+[[family]]
+id = "cyclone10lp"
+name = "Intel Cyclone 10 LP"
+vendor = "intel"
+yosys = "synth_intel -family cyclone10lp"
+top_flag = true
+flatten = "default"
+backends = ["quartus"]
+constraints = "qsf"
+
+[[family]]
+id = "cycloneiv"
+name = "Intel/Altera Cyclone IV GX"
+vendor = "intel"
+yosys = "synth_intel -family cycloneiv"
+top_flag = true
+flatten = "default"
+backends = ["quartus"]
+constraints = "qsf"
+
+[[family]]
+id = "cycloneive"
+name = "Intel/Altera Cyclone IV E"
+vendor = "intel"
+yosys = "synth_intel -family cycloneive"
+top_flag = true
+flatten = "default"
+backends = ["quartus"]
+constraints = "qsf"
+
+# ---------------------------------------------------------------- Others
+[[family]]
+id = "gatemate"
+name = "Cologne Chip GateMate"
+vendor = "colognechip"
+yosys = "synth_gatemate"
+top_flag = true
+flatten = "default"
+backends = ["nextpnr"]
+constraints = "ccf"
+
+[[family]]
+id = "efinix"
+name = "Efinix Trion"
+vendor = "efinix"
+yosys = "synth_efinix"
+top_flag = true
+flatten = "default"
+backends = ["efinity"]
+constraints = "peri.xml"
+
+[[family]]
+id = "pp3"
+name = "QuickLogic PolarPro 3 (EOS S3)"
+vendor = "quicklogic"
+yosys = "synth_quicklogic -family pp3"
+top_flag = true
+flatten = "fixed"
+backends = ["vpr"]
+constraints = "pcf"
+
+[[family]]
+id = "generic"
+name = "Generic LUT architecture (VTR arch XML; routing only, no bitstream)"
+vendor = "generic"
+yosys = "synth; abc -lut 6; opt_clean"
+top_flag = true
+flatten = "flag"
+backends = ["vpr"]
+constraints = "none"

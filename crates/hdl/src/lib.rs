@@ -6,8 +6,10 @@
 //! - [`design`]: authoritative hierarchy and port lists from Yosys JSON.
 
 pub mod design;
-pub mod diag;
 pub mod scan;
+
+/// Diagnostics live in core (every stage uses them); re-exported here.
+pub use fpgaflow_core::diag;
 
 pub use design::{Design, Direction, Module, Port};
 pub use diag::{Diagnostic, Severity};

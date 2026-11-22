@@ -208,6 +208,7 @@ dependencies = [
  "fpgaflow-editor",
  "fpgaflow-hdl",
  "fpgaflow-sim",
+ "fpgaflow-synth",
  "serde_json",
  "tokio",
  "tokio-util",
@@ -220,6 +221,7 @@ dependencies = [
  "dirs",
  "glob",
  "nix",
+ "regex",
  "serde",
  "serde_json",
  "shell-words",
@@ -245,6 +247,7 @@ dependencies = [
 name = "fpgaflow-hdl"
 version = "0.1.0"
 dependencies = [
+ "fpgaflow-core",
  "regex",
  "serde",
  "serde_json",
@@ -263,6 +266,18 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-util",
+]
+
+[[package]]
+name = "fpgaflow-synth"
+version = "0.1.0"
+dependencies = [
+ "fpgaflow-core",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]

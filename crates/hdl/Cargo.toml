@@ -9,6 +9,7 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+fpgaflow-core.workspace = true
 regex.workspace = true
 serde.workspace = true
 # preserve_order keeps Yosys port order, which testbench generation relies on.

@@ -20,5 +20,6 @@ clap.workspace = true
 serde_json.workspace = true
 fpgaflow-hdl.workspace = true
 fpgaflow-sim.workspace = true
+fpgaflow-synth.workspace = true
 tokio = { workspace = true, features = ["signal"] }
 tokio-util.workspace = true

@@ -69,6 +69,17 @@ enum Cmd {
         #[arg(long, value_parser = ["icarus", "verilator"])]
         tool: Option<String>,
     },
+    /// Synthesise the RTL with Yosys for the target family.
+    Synth {
+        /// Override [target] family (see `fpgaflow families`).
+        #[arg(long)]
+        family: Option<String>,
+        /// Override [target] backend; decides the netlist format.
+        #[arg(long)]
+        backend: Option<String>,
+    },
+    /// List supported FPGA families and their P&R backends.
+    Families,
     /// Elaborate the RTL with Yosys and print the module hierarchy and ports.
     Hier {
         /// Top module (default: [project] top, else Yosys picks).
@@ -103,6 +114,10 @@ fn main() -> Result<()> {
         Cmd::Sim { tool, waves } => flow::sim(&cli.dir, &cfg, tool.as_deref(), waves),
         Cmd::Waves { tool } => flow::waves(&cli.dir, &cfg, tool.as_deref()),
         Cmd::Hier { top } => flow::hier(&cli.dir, &cfg, top),
+        Cmd::Synth { family, backend } => {
+            flow::synth(&cli.dir, &cfg, family.as_deref(), backend.as_deref())
+        }
+        Cmd::Families => flow::families(),
     }
 }
 

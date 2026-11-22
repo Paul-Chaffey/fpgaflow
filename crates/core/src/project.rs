@@ -55,6 +55,8 @@ pub struct ProjectFile {
     pub sources: Sources,
     #[serde(default)]
     pub sim: SimSection,
+    #[serde(default, skip_serializing_if = "SynthSection::is_default")]
+    pub synth: SynthSection,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<TargetSection>,
     #[serde(default)]
@@ -129,6 +131,39 @@ pub struct SimSection {
     pub wave: WaveFormat,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Frontend {
+    /// Yosys' built-in `read_verilog -sv` (a SystemVerilog subset).
+    #[default]
+    Verilog,
+    /// The yosys-slang plugin (`read_slang`): full SystemVerilog.
+    Slang,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct SynthSection {
+    pub frontend: Frontend,
+    /// Replace the family's synthesis command with the commands in this
+    /// Yosys script (relative to the project root). Reading the sources,
+    /// `hierarchy`, `stat` and writing the netlist are still done for you.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub script: Option<PathBuf>,
+    /// Extra Yosys commands run after synthesis, before the netlist is written.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub extra: Vec<String>,
+    /// Keep the hierarchy instead of flattening (where the family allows it).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub keep_hierarchy: bool,
+}
+
+impl SynthSection {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct TargetSection {
@@ -178,6 +213,7 @@ impl ProjectFile {
             },
             sources: Sources::default(),
             sim: SimSection::default(),
+            synth: SynthSection::default(),
             target: None,
             program: ProgramSection::default(),
         }

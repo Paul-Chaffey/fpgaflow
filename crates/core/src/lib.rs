@@ -3,8 +3,11 @@
 //! runner that every flow stage uses to run tools.
 
 pub mod config;
+pub mod diag;
+pub mod family;
 pub mod job;
 pub mod project;
+pub mod stage;
 pub mod tools;
 
 pub use config::{EditorConfig, EditorPreset, UserConfig};

@@ -38,11 +38,14 @@ Early development. Working today, from the CLI:
 | `fpgaflow sim [--tool icarus\|verilator] [--waves]` | compile and run the self-checking testbench, PASS/FAIL verdict, optional GTKWave |
 | `fpgaflow waves` | open the last waveform in GTKWave with a saved or generated layout |
 | `fpgaflow hier` | Yosys elaboration: module hierarchy and port lists |
+| `fpgaflow synth [--family F] [--backend B]` | Yosys synthesis for the target; utilisation by resource type; netlist in the backend's format |
+| `fpgaflow families` | the 24 supported families and their P&R backends |
 | `fpgaflow edit [file] [--line N --col N]` | open in the configured editor (Kate by default) |
 
 Compiler errors from Icarus, Verilator and Yosys are reported as
-`file:line:col` diagnostics. Synthesis, P&R, programming, the GUI and the
-Claude integration are next.
+`file:line:col` diagnostics. All 24 families synthesise the blinky example
+with Yosys 0.71. P&R, programming, the GUI and the Claude integration are
+next.
 
 ## Quick start
 
@@ -79,6 +82,11 @@ tool   = "verilator"   # or "icarus"
 tb_top = "tb_blinky"
 wave   = "fst"
 
+[synth]                # all optional
+frontend = "verilog"   # or "slang" for full SystemVerilog (yosys-slang)
+# script = "synth/custom.ys"   # replaces the family's synth command
+# extra  = ["opt -full"]       # run after synthesis
+
 [target]
 family  = "spartan3a"
 device  = "xc3s700an"
@@ -93,7 +101,7 @@ mode = "sram"          # or "flash"
 
 1. Skeleton: project model, Doctor, job runner, editor launcher, CLI *(done)*
 2. Simulation: Icarus and Verilator, GTKWave, clickable diagnostics *(done)*
-3. Synthesis: Yosys for every supported family
+3. Synthesis: Yosys for every supported family *(done)*
 4. P&R and bitstream:
    - ISE 14.7 (Spartan-3AN) first
    - then nextpnr (iCE40, ECP5)
