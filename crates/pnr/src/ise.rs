@@ -325,6 +325,28 @@ pub fn plan_package(cfg: &UserConfig, devpkg: &str, dir: &Path) -> Result<Plan, 
     ))
 }
 
+/// Plan bitgen from a routed `.ncd` to `out`, starting up on CCLK (for
+/// booting from flash), with the board's other `-g` options.
+pub fn plan_flash_bitstream(
+    cfg: &UserConfig,
+    ncd: &Path,
+    out: &Path,
+    extra: &[String],
+) -> Result<Plan, PnrError> {
+    let settings = settings_script(cfg)?;
+    let dir = ncd.parent().unwrap_or(Path::new("."));
+    let mut args: Vec<String> = vec!["-w".into(), "-g".into(), "StartupClk:Cclk".into()];
+    for g in extra.iter().filter(|g| !g.starts_with("StartupClk:")) {
+        args.extend(["-g".into(), g.clone()]);
+    }
+    args.push(ncd.to_string_lossy().into_owned());
+    args.push(out.to_string_lossy().into_owned());
+    args.push(ncd.with_extension("pcf").to_string_lossy().into_owned());
+    let a: Vec<&str> = args.iter().map(String::as_str).collect();
+    let j = job(&settings, "ise:bitgen-flash", dir, "bitgen", &a);
+    Ok(one_job_plan("bitstream", dir, j, vec![out.to_path_buf()]))
+}
+
 /// Plan `xdl -ncd2xdl <ncd> <xdl>`: the placed and routed design as text.
 pub fn plan_xdl(cfg: &UserConfig, ncd: &Path, xdl: &Path) -> Result<Plan, PnrError> {
     let settings = settings_script(cfg)?;

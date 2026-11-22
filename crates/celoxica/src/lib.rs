@@ -16,9 +16,21 @@
 //! `AA 99 55 66` sync word. The bitstream must use `StartupClk:Cclk`, since
 //! the FX2 drives CCLK.
 //!
-//! Only these requests are ever sent. Vendor request `0x43` (Celoxica's
-//! flash, clock and RAM commands) and `0xA0` (the FX2's firmware loader) are
-//! deliberately not used, so the board's flash and firmware are never touched.
+//! Flash (16 MB NAND holding numbered files 1..254; file 1 boots the FPGA at
+//! power-up and on the reset button) uses alternate setting 1 and vendor OUT
+//! `bRequest 0x43` with a 10-byte command, read from `RC.dll`'s
+//! `RCFlashIndex*` functions and the driver's IOCTL handlers:
+//!
+//! | operation | command | then |
+//! |---|---|---|
+//! | length of file i | `04 i` | bulk IN 4 bytes, little-endian (0 = empty) |
+//! | read | `00 i, bytes (BE32), start (BE32)` | bulk IN `bytes` on EP `0x86` |
+//! | erase file i | `02 i` | |
+//! | append to file i | `03 i, length (BE32)` | bulk OUT `length` (<= 2 MiB per command) |
+//!
+//! Reading uses only `04` and `00`. Nothing else is sent: not Celoxica's
+//! format, clock or RAM commands, and not `0xA0` (the FX2's firmware loader),
+//! so the FX2 firmware is never touched.
 
 use std::time::{Duration, Instant};
 
@@ -41,6 +53,18 @@ const BULK_TIMEOUT: Duration = Duration::from_secs(10);
 const DONE_TIMEOUT: Duration = Duration::from_secs(1);
 
 const SYNC: [u8; 4] = [0xaa, 0x99, 0x55, 0x66];
+
+const REQ_COMMAND: u8 = 0x43;
+const EP_IN: u8 = 0x86;
+/// Alternate setting for flash access (Celoxica's "mode 2").
+const ALT_FLASH: u8 = 1;
+/// Flash file numbers the RC10 uses.
+pub const FLASH_FILES: std::ops::RangeInclusive<u8> = 1..=254;
+/// The file the FX2 loads into the FPGA at power-up / reset.
+pub const BOOT_FILE: u8 = 1;
+const FLASH_READ_CHUNK: u32 = 64 * 1024;
+const FLASH_WRITE_CHUNK: usize = 2 * 1024 * 1024;
+const FLASH_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -68,6 +92,14 @@ pub enum Error {
     Usb(#[from] rusb::Error),
     #[error("{0}: {1}")]
     File(String, std::io::Error),
+    #[error("flash file {index} is {found} bytes after writing, expected {expected}")]
+    FlashLength {
+        index: u8,
+        expected: usize,
+        found: usize,
+    },
+    #[error("flash file {0} reads back different from what was written")]
+    FlashVerify(u8),
 }
 
 /// Fields of a `.bit` file header that matter here.
@@ -224,8 +256,121 @@ impl Board {
     }
 }
 
+impl Board {
+    fn command(&self, packet: [u8; 10]) -> Result<(), Error> {
+        self.handle
+            .write_control(0x40, REQ_COMMAND, 0, 0, &packet, FLASH_TIMEOUT)?;
+        Ok(())
+    }
+
+    /// Read exactly `n` bytes from the bulk IN endpoint.
+    fn read_exact(&self, n: usize) -> Result<Vec<u8>, Error> {
+        let mut out = Vec::with_capacity(n);
+        // Buffers are whole 512-byte packets so a full packet never overflows.
+        let mut buf = vec![0u8; n.div_ceil(512).max(1) * 512];
+        while out.len() < n {
+            let want = (n - out.len()).div_ceil(512) * 512;
+            let got = self
+                .handle
+                .read_bulk(EP_IN, &mut buf[..want], FLASH_TIMEOUT)?;
+            if got == 0 {
+                return Err(Error::Usb(rusb::Error::Io));
+            }
+            out.extend_from_slice(&buf[..got.min(n - out.len())]);
+        }
+        Ok(out)
+    }
+
+    fn flash_mode(&self) -> Result<(), Error> {
+        self.handle.set_alternate_setting(0, ALT_FLASH)?;
+        Ok(())
+    }
+
+    /// Back to the configuration interface (alternate setting 0).
+    pub fn normal_mode(&self) -> Result<(), Error> {
+        self.handle.set_alternate_setting(0, 0)?;
+        Ok(())
+    }
+
+    /// Length of flash file `index` (0 if there is none).
+    pub fn flash_length(&self, index: u8) -> Result<u32, Error> {
+        self.flash_mode()?;
+        self.command([0x04, index, 0, 0, 0, 0, 0, 0, 0, 0])?;
+        let b = self.read_exact(4)?;
+        Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    }
+
+    /// Read the whole of flash file `index`. `progress` gets (read, total).
+    pub fn flash_read(
+        &self,
+        index: u8,
+        mut progress: impl FnMut(usize, usize),
+    ) -> Result<Vec<u8>, Error> {
+        let len = self.flash_length(index)?;
+        let mut out = Vec::with_capacity(len as usize);
+        let mut start = 0u32;
+        while start < len {
+            let n = FLASH_READ_CHUNK.min(len - start);
+            let mut p = [0u8; 10];
+            p[0] = 0x00;
+            p[1] = index;
+            p[2..6].copy_from_slice(&n.to_be_bytes());
+            p[6..10].copy_from_slice(&start.to_be_bytes());
+            self.command(p)?;
+            out.extend(self.read_exact(n as usize)?);
+            start += n;
+            progress(out.len(), len as usize);
+        }
+        Ok(out)
+    }
+
+    /// The first `bytes` of flash file `index` (to identify it).
+    pub fn flash_read_head(&self, index: u8, bytes: u32) -> Result<Vec<u8>, Error> {
+        self.flash_mode()?;
+        let mut p = [0u8; 10];
+        p[1] = index;
+        p[2..6].copy_from_slice(&bytes.to_be_bytes());
+        self.command(p)?;
+        self.read_exact(bytes as usize)
+    }
+
+    /// Replace flash file `index` with `data` (erase, then append).
+    /// The boot file must be a bitstream for this board.
+    pub fn flash_write(
+        &self,
+        index: u8,
+        data: &[u8],
+        mut progress: impl FnMut(usize, usize),
+    ) -> Result<(), Error> {
+        if index == BOOT_FILE {
+            check_bitstream(data, self.name, self.part)?;
+        }
+        self.flash_mode()?;
+        self.command([0x02, index, 0, 0, 0, 0, 0, 0, 0, 0])?;
+        let mut sent = 0;
+        for chunk in data.chunks(FLASH_WRITE_CHUNK) {
+            let mut p = [0u8; 10];
+            p[0] = 0x03;
+            p[1] = index;
+            p[2..6].copy_from_slice(&(chunk.len() as u32).to_be_bytes());
+            self.command(p)?;
+            let mut off = 0;
+            while off < chunk.len() {
+                let end = (off + CHUNK).min(chunk.len());
+                off += self
+                    .handle
+                    .write_bulk(EP_BITSTREAM, &chunk[off..end], FLASH_TIMEOUT)?;
+                progress(sent + off, data.len());
+            }
+            sent += chunk.len();
+        }
+        Ok(())
+    }
+}
+
 impl Drop for Board {
     fn drop(&mut self) {
+        let _ = self.handle.set_alternate_setting(0, 0);
         let _ = self.handle.release_interface(0);
     }
 }

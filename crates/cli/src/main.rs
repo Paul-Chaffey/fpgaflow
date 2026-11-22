@@ -123,6 +123,12 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<FloorplanCmd>,
     },
+    /// Board flash: read it to a file, or write the project's bitstream to it
+    /// so the board boots from it.
+    Flash {
+        #[command(subcommand)]
+        cmd: FlashCmd,
+    },
     /// List known dev boards.
     Boards,
     /// Scan USB for dev boards and programming cables.
@@ -150,6 +156,19 @@ enum Cmd {
         #[arg(long)]
         top: Option<String>,
     },
+}
+
+#[derive(Subcommand)]
+enum FlashCmd {
+    /// Save the connected board's flash (read-only). Default file:
+    /// images/<board>-flash-<date>.bin|.tar
+    Read {
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Write the project's bitstream to its board's flash (replaces what the
+    /// board boots from; read it first to keep a copy).
+    Write,
 }
 
 #[derive(Subcommand)]
@@ -202,6 +221,10 @@ fn main() -> Result<()> {
         Cmd::Families => flow::families(),
         Cmd::Program { bit } => flow::program(&cli.dir, &cfg, bit),
         Cmd::Detect => flow::detect(&cli.dir, &cfg),
+        Cmd::Flash { cmd } => match cmd {
+            FlashCmd::Read { out } => flow::flash_read(&cli.dir, &cfg, out),
+            FlashCmd::Write => flow::flash_write(&cli.dir, &cfg),
+        },
         Cmd::Floorplan { cmd } => match cmd {
             None => flow::floorplan(&cli.dir, &cfg, None),
             Some(FloorplanCmd::Set { module, range }) => {

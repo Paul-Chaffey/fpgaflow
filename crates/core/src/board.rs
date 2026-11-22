@@ -34,6 +34,13 @@ pub struct ProgramProfile {
     /// The FPGA's position in the JTAG chain.
     #[serde(default)]
     pub index_chain: Option<u32>,
+    /// Chain position of a JTAG configuration PROM (e.g. an XCF04S) that
+    /// openFPGALoader can read and write; enables flash for the board.
+    #[serde(default)]
+    pub flash_index_chain: Option<u32>,
+    /// What the board's flash is, for messages (e.g. "XCF04S Platform Flash").
+    #[serde(default)]
+    pub flash: Option<String>,
 }
 
 /// Package pins a design must never use, e.g. I/O pins the board wires

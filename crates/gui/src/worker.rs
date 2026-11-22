@@ -23,6 +23,10 @@ pub enum Action {
     Build,
     Program,
     Detect,
+    /// Write the bitstream to the board's flash.
+    ProgramFlash,
+    /// Read the connected board's flash to a file (see `spawn_flash_read`).
+    ReadFlash,
 }
 
 impl Action {
@@ -35,6 +39,8 @@ impl Action {
             Action::Build => "Build",
             Action::Program => "Program",
             Action::Detect => "Detect",
+            Action::ProgramFlash => "Program flash",
+            Action::ReadFlash => "Read flash",
         }
     }
 
@@ -45,7 +51,9 @@ impl Action {
             Action::Sim(_) => Slot::Sim,
             Action::Synth => Slot::Synth,
             Action::Build => Slot::Build,
-            Action::Program | Action::Detect => Slot::Program,
+            Action::Program | Action::Detect | Action::ProgramFlash | Action::ReadFlash => {
+                Slot::Program
+            }
         }
     }
 }
@@ -150,6 +158,10 @@ pub fn spawn_action(
             Action::Detect => fpgaflow_flow::detect(p, c, &ctx)
                 .await
                 .map(Outcome::Summary),
+            Action::ProgramFlash => fpgaflow_flow::program_flash(p, c, &ctx)
+                .await
+                .map(Outcome::Summary),
+            Action::ReadFlash => Err(anyhow::anyhow!("use spawn_flash_read")),
         };
         drop(ctx); // closes the event channel so `forward` finishes
         let _ = forward.await;
@@ -220,6 +232,43 @@ pub fn spawn_pins(
         let _ = forward.await;
         let _ = tx.send(Msg::Pins(
             r.map(std::sync::Arc::new).map_err(|e| format!("{e:#}")),
+        ));
+        repaint.request_repaint();
+    });
+}
+
+/// Read a board's flash into `out`; reports as `Msg::Done(Action::ReadFlash, ..)`.
+/// Needs no project: it reads whichever known board is connected.
+pub fn spawn_flash_read(
+    rt: &tokio::runtime::Runtime,
+    repaint: egui::Context,
+    tx: Sender<Msg>,
+    board: &'static fpgaflow_core::board::Board,
+    out: PathBuf,
+    cfg: UserConfig,
+    cancel: CancellationToken,
+) {
+    rt.spawn(async move {
+        let (etx, mut erx) = tokio::sync::mpsc::unbounded_channel();
+        let (fwd_tx, fwd_repaint) = (tx.clone(), repaint.clone());
+        let forward = tokio::spawn(async move {
+            while let Some(ev) = erx.recv().await {
+                if fwd_tx.send(Msg::Event(ev)).is_err() {
+                    break;
+                }
+                fwd_repaint.request_repaint();
+            }
+        });
+        let ctx = Ctx {
+            events: etx,
+            cancel,
+        };
+        let r = fpgaflow_flow::read_flash(&cfg, board, &out, &ctx).await;
+        drop(ctx);
+        let _ = forward.await;
+        let _ = tx.send(Msg::Done(
+            Action::ReadFlash,
+            r.map(Outcome::Summary).map_err(|e| format!("{e:#}")),
         ));
         repaint.request_repaint();
     });

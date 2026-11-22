@@ -1,7 +1,7 @@
 //! CLI front ends: run a `fpgaflow_flow` action and print its results.
 
 use std::future::Future;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use fpgaflow_core::job::JobEvent;
@@ -436,6 +436,48 @@ pub fn layout(
                 pin.pin
             );
         }
+    }
+    Ok(())
+}
+
+pub fn flash_read(dir: &Path, cfg: &UserConfig, out: Option<PathBuf>) -> Result<()> {
+    let project = Project::find(dir).ok();
+    let board =
+        fpgaflow_flow::connected_board(project.as_ref()).context("no known board is connected")?;
+    let out = match out {
+        Some(o) => o,
+        None => {
+            let ext = match board.program.as_ref().map(|p| p.method) {
+                Some(fpgaflow_core::board::ProgramMethod::Celoxica) => "tar",
+                _ => "bin",
+            };
+            let stamp = std::process::Command::new("date")
+                .arg("+%Y%m%d-%H%M")
+                .output()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_default();
+            fpgaflow_core::paths::images_dir(cfg).join(format!("{}-flash-{stamp}.{ext}", board.id))
+        }
+    };
+    let s = run(|ctx| {
+        let out = &out;
+        async move { fpgaflow_flow::read_flash(cfg, board, out, &ctx).await }
+    })?;
+    if !s.ok {
+        bail!("reading the flash failed");
+    }
+    println!("saved {}", out.display());
+    Ok(())
+}
+
+pub fn flash_write(dir: &Path, cfg: &UserConfig) -> Result<()> {
+    let project = Project::find(dir)?;
+    let s = run(|ctx| {
+        let project = &project;
+        async move { fpgaflow_flow::program_flash(project, cfg, &ctx).await }
+    })?;
+    if !s.ok {
+        bail!("writing the flash failed");
     }
     Ok(())
 }

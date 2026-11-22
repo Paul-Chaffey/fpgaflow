@@ -16,6 +16,9 @@ pub struct UserConfig {
     pub tool_paths: BTreeMap<String, PathBuf>,
     /// Directories searched before `$PATH`, e.g. the OSS CAD Suite and ISE.
     pub search_paths: Vec<PathBuf>,
+    /// Where flash images are saved and read from (default: `images/` in
+    /// the fpgaflow source tree, else `~/fpgaflow-images`).
+    pub images_dir: Option<PathBuf>,
 }
 
 impl Default for UserConfig {
@@ -33,6 +36,7 @@ impl Default for UserConfig {
                 home.join("Xilinx/14.7/ISE_DS/ISE/bin/lin64"),
                 PathBuf::from("/opt/Xilinx/14.7/ISE_DS/ISE/bin/lin64"),
             ],
+            images_dir: None,
         }
     }
 }

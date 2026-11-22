@@ -7,8 +7,10 @@ pub mod config;
 pub mod diag;
 pub mod family;
 pub mod job;
+pub mod paths;
 pub mod project;
 pub mod stage;
+pub mod state;
 pub mod status;
 pub mod tools;
 

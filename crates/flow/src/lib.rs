@@ -441,6 +441,103 @@ pub fn cables(cfg: &UserConfig) -> Vec<boards::Cable> {
         .unwrap_or_default()
 }
 
+// ------------------------------------------------------------------ flash
+
+pub use fpgaflow_program::flash_name;
+
+/// The known board that is plugged in now (the project's own board first).
+pub fn connected_board(project: Option<&Project>) -> Option<&'static fpgaflow_core::board::Board> {
+    let present = boards::scan().unwrap_or_default();
+    let plugged =
+        |b: &fpgaflow_core::board::Board| present.iter().any(|d| b.matches_usb(d.vid, d.pid));
+    project
+        .and_then(fpgaflow_pnr::project_board)
+        .filter(|b| plugged(b))
+        .or_else(|| fpgaflow_core::board::boards().iter().find(|b| plugged(b)))
+}
+
+/// Read the whole flash of `board` into `out` (read-only).
+pub async fn read_flash(
+    cfg: &UserConfig,
+    board: &fpgaflow_core::board::Board,
+    out: &Path,
+    ctx: &Ctx,
+) -> Result<Summary> {
+    let flash = fpgaflow_program::flash_name(board)
+        .with_context(|| format!("fpgaflow cannot read the flash on the {}", board.name))?;
+    if let Some(dir) = out.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    // Run records go to a scratch directory, not next to the image.
+    let workdir = device_cache_dir().with_file_name("flash");
+    std::fs::create_dir_all(&workdir)?;
+    ctx.note(format!(
+        "reading the {} on the {} into {}",
+        flash,
+        board.name,
+        out.display()
+    ));
+    let s = ctx
+        .run(&fpgaflow_program::plan_flash_read(
+            board, cfg, out, &workdir,
+        )?)
+        .await?;
+    if s.ok && !out.is_file() {
+        anyhow::bail!(
+            "the flash read finished but {} was not written",
+            out.display()
+        );
+    }
+    Ok(s)
+}
+
+/// Write the project's bitstream to its board's flash so it boots from it.
+/// For boards whose SRAM bitstreams start up on the JTAG clock, a CCLK
+/// copy (`<top>_flash.bit`) is made from the routed design first.
+pub async fn program_flash(project: &Project, cfg: &UserConfig, ctx: &Ctx) -> Result<Summary> {
+    let board = fpgaflow_program::project_board(project)?;
+    let flash = fpgaflow_program::flash_name(board)
+        .with_context(|| format!("fpgaflow cannot write the flash on the {}", board.name))?;
+    let bit = fpgaflow_program::default_bitstream(project);
+    anyhow::ensure!(
+        bit.is_file(),
+        "no bitstream at {}; run Build first",
+        rel(project, &bit).display()
+    );
+    let cclk = board.bitgen.iter().any(|g| g == "StartupClk:Cclk");
+    let image = if cclk {
+        bit
+    } else {
+        let ncd = bit.with_extension("ncd");
+        let stem = bit
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        let out = bit.with_file_name(format!("{stem}_flash.bit"));
+        ctx.note("making a CCLK start-up copy of the bitstream for booting from flash");
+        let s = ctx
+            .run(&ise::plan_flash_bitstream(cfg, &ncd, &out, &board.bitgen)?)
+            .await?;
+        anyhow::ensure!(s.ok && out.is_file(), "bitgen for the flash image failed");
+        out
+    };
+    ctx.note(format!(
+        "writing {} to the {} on the {}",
+        rel(project, &image).display(),
+        flash,
+        board.name
+    ));
+    let workdir = project.stage_dir("program");
+    let r = ctx
+        .run(&fpgaflow_program::plan_flash_write(
+            board, cfg, &image, &workdir,
+        )?)
+        .await;
+    remember(project, Step::Program, &r, |s| (s.ok, Some("flash".into())));
+    r
+}
+
 // ------------------------------------------------------------------ layout
 
 pub use fpgaflow_layout as layout_model;

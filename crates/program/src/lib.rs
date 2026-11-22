@@ -17,6 +17,8 @@ use fpgaflow_core::{tools, UserConfig};
 /// Upper bound for a load; a 700AN SRAM load takes a few seconds at 750 kHz.
 const PROGRAM_TIMEOUT: Duration = Duration::from_secs(300);
 const DETECT_TIMEOUT: Duration = Duration::from_secs(60);
+/// Flash reads and writes are slow at the 750 kHz JTAG clock.
+const FLASH_TIMEOUT: Duration = Duration::from_secs(900);
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProgramError {
@@ -30,7 +32,7 @@ pub enum ProgramError {
     NoBitstream(PathBuf),
     #[error("cable firmware {0} not found (it ships with ISE 14.7; run `fpgaflow doctor`)")]
     NoFirmware(String),
-    #[error("flash programming is not supported for {0} yet; use [program] mode = \"sram\"")]
+    #[error("fpgaflow cannot read or write the flash on this board ({0})")]
     FlashNotSupported(String),
     #[error("no JTAG cable is set up for the {0} yet (see its notes in data/boards.toml)")]
     NoProgrammer(String),
@@ -140,6 +142,89 @@ pub fn plan_program(project: &Project, cfg: &UserConfig, bit: &Path) -> Result<P
         verdict_job: None,
         files: vec![],
     })
+}
+
+/// What a board's flash is, if fpgaflow can read and write it.
+pub fn flash_name(b: &Board) -> Option<&str> {
+    let p = b.program.as_ref()?;
+    let ok = match p.method {
+        ProgramMethod::Celoxica => true,
+        ProgramMethod::Openfpgaloader => p.flash_index_chain.is_some(),
+    };
+    ok.then(|| p.flash.as_deref().unwrap_or("flash"))
+}
+
+fn flash_args(b: &Board, cfg: &UserConfig) -> Result<Vec<String>, ProgramError> {
+    let p = profile(b)?;
+    let chain = p
+        .flash_index_chain
+        .ok_or_else(|| ProgramError::FlashNotSupported(b.device.clone()))?;
+    let mut args = cable_args(b, cfg)?;
+    if let Some(i) = args.iter().position(|a| a == "--index-chain") {
+        args.drain(i..i + 2);
+    }
+    args.extend(["--index-chain".into(), chain.to_string()]);
+    Ok(args)
+}
+
+fn single(stage: &str, job: JobSpec, workdir: &Path) -> Plan {
+    Plan {
+        stage: stage.into(),
+        workdir: workdir.to_path_buf(),
+        jobs: vec![job.timeout(FLASH_TIMEOUT)],
+        outputs: vec![],
+        verdict_job: None,
+        files: vec![],
+    }
+}
+
+/// Plan reading the board's whole flash into `out` (read-only): the XCF
+/// PROM's contents as raw bytes, or every RC10 flash file in a `.tar`.
+pub fn plan_flash_read(
+    b: &Board,
+    cfg: &UserConfig,
+    out: &Path,
+    workdir: &Path,
+) -> Result<Plan, ProgramError> {
+    if flash_name(b).is_none() {
+        return Err(ProgramError::FlashNotSupported(b.device.clone()));
+    }
+    let job = match profile(b)?.method {
+        ProgramMethod::Openfpgaloader => JobSpec::new("flash-read", loader(cfg)?, workdir)
+            .args(flash_args(b, cfg)?)
+            .arg("--dump-flash")
+            .arg(out),
+        ProgramMethod::Celoxica => JobSpec::new("flash-read", celoxica(cfg)?, workdir)
+            .arg("flash-read")
+            .arg(out),
+    };
+    Ok(single("flash-read", job, workdir))
+}
+
+/// Plan writing `bit` to the board's flash, so the FPGA boots it. The
+/// bitstream must start up on CCLK.
+pub fn plan_flash_write(
+    b: &Board,
+    cfg: &UserConfig,
+    bit: &Path,
+    workdir: &Path,
+) -> Result<Plan, ProgramError> {
+    if flash_name(b).is_none() {
+        return Err(ProgramError::FlashNotSupported(b.device.clone()));
+    }
+    if !bit.is_file() {
+        return Err(ProgramError::NoBitstream(bit.to_path_buf()));
+    }
+    let job = match profile(b)?.method {
+        ProgramMethod::Openfpgaloader => JobSpec::new("flash-write", loader(cfg)?, workdir)
+            .args(flash_args(b, cfg)?)
+            .arg("--write-flash")
+            .arg(bit),
+        ProgramMethod::Celoxica => JobSpec::new("flash-write", celoxica(cfg)?, workdir)
+            .arg("flash-write")
+            .arg(bit),
+    };
+    Ok(single("flash-write", job, workdir))
 }
 
 /// Plan a read-only JTAG scan (`--detect`) of a board.

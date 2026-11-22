@@ -7,3 +7,6 @@
 /Downloads/
 # Celoxica PDK 4.1 and RC10 documents (copyrighted, local reference only)
 /docs/celoxica/
+# Flash images read from boards (may contain third-party bitstreams)
+/images/*
+!/images/README.md

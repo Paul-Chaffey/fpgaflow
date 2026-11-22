@@ -132,7 +132,18 @@ pub struct App {
     ai: AiPanel,
     device: DeviceView,
     pins: PinView,
+    /// Remembered between runs (last project folder).
+    state: fpgaflow_core::state::State,
+    flash_read: Option<FlashReadForm>,
+    confirm_flash: bool,
     splash: crate::splash::Splash,
+}
+
+/// Tools › Read flash…
+struct FlashReadForm {
+    board: Option<&'static board::Board>,
+    folder: String,
+    file: String,
 }
 
 impl App {
@@ -176,6 +187,9 @@ impl App {
             ai: AiPanel::default(),
             device: DeviceView::default(),
             pins: PinView::default(),
+            state: fpgaflow_core::state::State::load(),
+            flash_read: None,
+            confirm_flash: false,
             splash: crate::splash::Splash::new(&cc.egui_ctx),
         };
         match worker::start_hotplug(app.repaint.clone(), app.tx.clone()) {
@@ -227,6 +241,8 @@ impl App {
     // ------------------------------------------------------------ state
 
     fn set_project(&mut self, p: Project) {
+        self.state.last_project = Some(p.root.clone());
+        self.state.save();
         self.sim_tool = p.file.sim.tool;
         self._fs_watch = match worker::watch_project(&p.root, self.repaint.clone(), self.tx.clone())
         {
@@ -326,6 +342,167 @@ impl App {
             }
             Err(e) => self.message = Some((false, format!("floorplan: {e:#}"))),
         }
+    }
+
+    fn open_flash_read(&mut self) {
+        let board = fpgaflow_flow::connected_board(self.project.as_ref());
+        let ext = match board.and_then(|b| b.program.as_ref()).map(|p| p.method) {
+            Some(board::ProgramMethod::Celoxica) => "tar",
+            _ => "bin",
+        };
+        let stamp = std::process::Command::new("date")
+            .arg("+%Y%m%d-%H%M")
+            .output()
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
+        self.flash_read = Some(FlashReadForm {
+            board,
+            folder: fpgaflow_core::paths::images_dir(&self.cfg)
+                .display()
+                .to_string(),
+            file: format!(
+                "{}-flash-{stamp}.{ext}",
+                board.map(|b| b.id.as_str()).unwrap_or("board")
+            ),
+        });
+    }
+
+    fn flash_windows(&mut self, ctx: &egui::Context) {
+        if let Some(mut f) = self.flash_read.take() {
+            let mut open = true;
+            let mut go = false;
+            egui::Window::new("Read flash")
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    match f.board {
+                        Some(b) => {
+                            ui.label(format!(
+                                "{}: {}",
+                                b.name,
+                                fpgaflow_flow::flash_name(b).unwrap_or("no readable flash")
+                            ));
+                        }
+                        None => {
+                            ui.colored_label(
+                                Color32::from_rgb(220, 80, 70),
+                                "No known board is connected.",
+                            );
+                        }
+                    }
+                    ui.small("Reading never changes the flash.");
+                    egui::Grid::new("flash_read").num_columns(2).show(ui, |ui| {
+                        ui.label("Folder");
+                        ui.horizontal(|ui| {
+                            ui.add(egui::TextEdit::singleline(&mut f.folder).desired_width(320.0));
+                            if ui.button("Browse…").clicked() {
+                                if let Some(d) = rfd::FileDialog::new()
+                                    .set_directory(&f.folder)
+                                    .pick_folder()
+                                {
+                                    f.folder = d.display().to_string();
+                                }
+                            }
+                        });
+                        ui.end_row();
+                        ui.label("File name");
+                        ui.add(egui::TextEdit::singleline(&mut f.file).desired_width(320.0));
+                        ui.end_row();
+                    });
+                    let out = PathBuf::from(&f.folder).join(&f.file);
+                    if out.exists() {
+                        ui.colored_label(
+                            Color32::from_rgb(200, 170, 60),
+                            "That file exists and will be replaced.",
+                        );
+                    }
+                    let ready = f.board.and_then(fpgaflow_flow::flash_name).is_some()
+                        && !f.file.trim().is_empty()
+                        && self.running.is_none();
+                    if ui
+                        .add_enabled(ready, egui::Button::new("Read flash"))
+                        .clicked()
+                    {
+                        go = true;
+                    }
+                });
+            if go {
+                let out = PathBuf::from(&f.folder).join(f.file.trim());
+                if let Some(b) = f.board {
+                    self.start_flash_read(b, out);
+                }
+            } else if open {
+                self.flash_read = Some(f);
+            }
+        }
+        if self.confirm_flash {
+            let board = self.board_connected();
+            let what = board.and_then(fpgaflow_flow::flash_name).unwrap_or("flash");
+            let replaces = match board.and_then(|b| b.program.as_ref()).map(|p| p.method) {
+                Some(board::ProgramMethod::Celoxica) => {
+                    "This replaces flash file 1, which the RC10 boots from: Celoxica's demo menu, if it is still there."
+                }
+                _ => "This replaces whatever the Platform Flash holds now. The FPGA boots from it when the configuration mode jumpers select Master Serial.",
+            };
+            let mut open = true;
+            let mut go = false;
+            egui::Window::new("Program flash")
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.label(format!(
+                        "Write this project's bitstream to the {what} on the {}?",
+                        board.map(|b| b.name.as_str()).unwrap_or("board")
+                    ));
+                    ui.label(replaces);
+                    ui.small("Use Tools › Read flash… first to keep a copy of what is there.");
+                    ui.horizontal(|ui| {
+                        if ui.button("Write flash").clicked() {
+                            go = true;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            self.confirm_flash = false;
+                        }
+                    });
+                });
+            if !open {
+                self.confirm_flash = false;
+            }
+            if go {
+                self.confirm_flash = false;
+                self.start(Action::ProgramFlash);
+            }
+        }
+    }
+
+    fn start_flash_read(&mut self, b: &'static board::Board, out: PathBuf) {
+        if self.running.is_some() {
+            return;
+        }
+        let cancel = CancellationToken::new();
+        self.status.insert(Slot::Program, Status::Running);
+        self.note(format!(
+            "---- Read flash: {} -> {} ----",
+            b.name,
+            out.display()
+        ));
+        self.tab = Tab::Log;
+        worker::spawn_flash_read(
+            &self.rt,
+            self.repaint.clone(),
+            self.tx.clone(),
+            b,
+            out,
+            self.cfg.clone(),
+            cancel.clone(),
+        );
+        self.running = Some(Running {
+            action: Action::ReadFlash,
+            cancel,
+        });
     }
 
     fn load_pins(&mut self) {
@@ -610,7 +787,7 @@ impl App {
                 if ui.button("New project…").clicked() {
                     self.new_project = NewProjectForm {
                         open: true,
-                        parent: dirs_home().display().to_string(),
+                        parent: self.state.open_dir().display().to_string(),
                         ..Default::default()
                     };
                     ui.close();
@@ -619,6 +796,7 @@ impl App {
                     ui.close();
                     if let Some(dir) = rfd::FileDialog::new()
                         .set_title("Open fpgaflow project")
+                        .set_directory(self.state.open_dir())
                         .pick_folder()
                     {
                         match Project::find(&dir) {
@@ -678,6 +856,35 @@ impl App {
                     ui.close();
                     self.tab = Tab::Device;
                     self.device.start_floorplan();
+                }
+                ui.separator();
+                if ui
+                    .button("Read flash…")
+                    .on_hover_text("Save the connected board's flash contents to a file")
+                    .clicked()
+                {
+                    ui.close();
+                    self.open_flash_read();
+                }
+                let flash_ok = self
+                    .board_connected()
+                    .and_then(fpgaflow_flow::flash_name)
+                    .is_some();
+                if ui
+                    .add_enabled(
+                        flash_ok && self.running.is_none(),
+                        egui::Button::new("Program flash…"),
+                    )
+                    .on_hover_text(
+                        "Write this project's bitstream to its board's flash, so it boots from it",
+                    )
+                    .on_disabled_hover_text(
+                        "Needs a project whose board is connected and has flash fpgaflow can write",
+                    )
+                    .clicked()
+                {
+                    ui.close();
+                    self.confirm_flash = true;
                 }
                 ui.separator();
                 if ui.button("Re-scan tools (Doctor)").clicked() {
@@ -814,7 +1021,11 @@ impl App {
         let Some(p) = self.project.clone() else {
             ui.label("No project open.");
             if ui.button("Open project…").clicked() {
-                if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                if let Some(dir) = rfd::FileDialog::new()
+                    .set_title("Open fpgaflow project")
+                    .set_directory(self.state.open_dir())
+                    .pick_folder()
+                {
                     match Project::find(&dir) {
                         Ok(p) => self.set_project(p),
                         Err(e) => self.message = Some((false, e.to_string())),
@@ -824,7 +1035,7 @@ impl App {
             if ui.button("New project…").clicked() {
                 self.new_project = NewProjectForm {
                     open: true,
-                    parent: dirs_home().display().to_string(),
+                    parent: self.state.open_dir().display().to_string(),
                     ..Default::default()
                 };
             }
@@ -1693,6 +1904,7 @@ impl eframe::App for App {
             });
         egui::CentralPanel::default().show(ui, |ui| self.tabs(ui));
         self.new_project_window(&ctx);
+        self.flash_windows(&ctx);
         self.splash.ui(&ctx);
     }
 }
@@ -1730,12 +1942,6 @@ fn id_label(id: &Identity) -> String {
         Identity::Cable { names } => format!("cable: {}", names.join(" / ")),
         Identity::Unknown => "unknown".into(),
     }
-}
-
-fn dirs_home() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/"))
 }
 
 fn fpgaflow_pnr_constraints(p: &Project) -> Vec<PathBuf> {

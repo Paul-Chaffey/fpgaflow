@@ -6,6 +6,8 @@
 #                      resolved in ISE's bin/lin64 directory
 # program.freq         JTAG clock in Hz (openFPGALoader may round it)
 # program.index_chain  position of the FPGA in the JTAG chain
+# program.flash_index_chain  position of a JTAG PROM to read/write as flash
+# program.flash        what the flash is (shown in messages)
 # usb                  VID:PID pairs that mean the board is connected
 # bitgen               extra ISE bitgen -g options; a StartupClk here wins
 # banks                VCCO per I/O bank in volts, where known (pin planner)
@@ -34,6 +36,10 @@ cable = "xilinxPlatformCableUsb_alt"
 firmware = "ise:xusb_emb.hex"
 freq = 750000
 index_chain = 0
+# The XCF04S Platform Flash is second on the chain. The FPGA boots from it
+# when the board's configuration mode jumpers select Master Serial.
+flash_index_chain = 1
+flash = "XCF04S Platform Flash"
 
 [[board]]
 id = "rc10"
@@ -67,6 +73,8 @@ bitgen = [
 banks = { 0 = 1.2, 1 = 3.3, 2 = 3.3, 3 = 2.5, 4 = 3.3, 5 = 3.3, 6 = 2.5, 7 = 2.5 }
 [board.program]
 method = "celoxica"
+# 16 MB NAND behind the FX2; file 1 boots at power-up and on reset.
+flash = "16 MB NAND flash (file 1 boots)"
 # I/O pins the RC10 wires straight to a supply (schematic sheet 3): driving
 # one low would short the rail. Celoxica's PSL library lists the same pins.
 [[board.reserved]]
