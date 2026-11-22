@@ -230,7 +230,7 @@ fn apply(project: &Project, only: &[String]) -> Result<()> {
     let all = fpgaflow_flow::proposals(project, &s.generated)?;
     let chosen: Vec<&fpgaflow_flow::Proposal> = all
         .iter()
-        .filter(|p| only.is_empty() || only.iter().any(|o| *o == p.file.path))
+        .filter(|p| only.is_empty() || only.contains(&p.file.path))
         .collect();
     if chosen.is_empty() {
         bail!(
