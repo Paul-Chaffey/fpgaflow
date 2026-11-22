@@ -5,3 +5,5 @@
 *.gtkw.bak
 # Local downloads (e.g. the proprietary ISE installer): never commit
 /Downloads/
+# Celoxica PDK 4.1 and RC10 documents (copyrighted, local reference only)
+/docs/celoxica/
