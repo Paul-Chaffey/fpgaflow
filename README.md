@@ -1,5 +1,9 @@
 # fpgaflow
 
+<p align="center">
+  <img src="data/icons/fpgaflow.png" alt="FPGA Flow icon: a chip outline labelled FPGA" width="160">
+</p>
+
 A complete FPGA design flow with a GUI, written in Rust, for Linux.
 
 ```
