@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use eframe::egui::{self, Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
+use fpgaflow_flow::layout_model::floorplan::{containment, Containment, Region};
 use fpgaflow_flow::layout_model::{site_xy, Device, Placed, TileClass};
 use fpgaflow_flow::LayoutData;
 
@@ -42,6 +43,8 @@ struct Geometry {
     grid: HashMap<(u32, u32), usize>,
     /// Tile name -> rectangle (routing PIPs are reported per tile).
     tile_by_name: HashMap<String, Rect>,
+    /// Every slice's centre and (X, Y), for snapping floorplan rectangles.
+    slices: Vec<(Pos2, (u32, u32))>,
     /// Module -> colour.
     colours: BTreeMap<String, Color32>,
     /// Instance index -> rectangle (placed instances only).
@@ -104,6 +107,21 @@ fn colours(placed: Option<&Placed>) -> BTreeMap<String, Color32> {
 }
 
 impl Geometry {
+    /// The slice nearest a scene position.
+    fn slice_at(&self, pos: Pos2) -> Option<(u32, u32)> {
+        self.slices
+            .iter()
+            .min_by(|a, b| a.0.distance_sq(pos).total_cmp(&b.0.distance_sq(pos)))
+            .map(|(_, xy)| *xy)
+    }
+
+    /// A region's rectangle on the scene.
+    fn region_rect(&self, r: &Region) -> Option<Rect> {
+        let a = self.sites.get(&format!("SLICE_X{}Y{}", r.x0, r.y0))?;
+        let b = self.sites.get(&format!("SLICE_X{}Y{}", r.x1, r.y1))?;
+        Some(a.union(*b).expand(0.6))
+    }
+
     fn new(l: &LayoutData) -> Geometry {
         let d = &l.device;
         let sites = site_rects(d);
@@ -156,6 +174,12 @@ impl Geometry {
                 .collect();
         }
         let max_density = density.values().copied().max().unwrap_or(1).max(1);
+        let slices = d
+            .sites
+            .iter()
+            .filter(|s| s.kind.starts_with("SLICE"))
+            .filter_map(|s| Some((sites.get(&s.name)?.center(), site_xy(&s.name)?)))
+            .collect();
         Geometry {
             extent: Rect::from_min_size(
                 Pos2::ZERO,
@@ -165,6 +189,7 @@ impl Geometry {
             sites,
             grid,
             tile_by_name,
+            slices,
             colours: colours(placed),
             inst_rects,
             drives,
@@ -189,6 +214,15 @@ pub struct DeviceView {
     selected_net: Option<usize>,
     selected_path: Option<usize>,
     hover: Option<String>,
+    /// Floorplan editing: left-drag draws a region, right/middle pans.
+    floorplan: bool,
+    regions: Vec<Region>,
+    regions_dirty: bool,
+    /// Rectangle being dragged, in scene coordinates.
+    drag: Option<(Pos2, Pos2)>,
+    /// A drawn region waiting for its module.
+    pending: Option<Region>,
+    pending_module: String,
 }
 
 impl Default for DeviceView {
@@ -207,6 +241,12 @@ impl Default for DeviceView {
             selected_net: None,
             selected_path: None,
             hover: None,
+            floorplan: false,
+            regions: Vec::new(),
+            regions_dirty: false,
+            drag: None,
+            pending: None,
+            pending_module: String::new(),
         }
     }
 }
@@ -214,6 +254,8 @@ impl Default for DeviceView {
 /// What the tab wants the app to do.
 pub enum DeviceRequest {
     Load,
+    /// Write `constraints/floorplan.ucf` with these regions.
+    SaveFloorplan(Vec<Region>),
 }
 
 impl DeviceView {
@@ -222,16 +264,24 @@ impl DeviceView {
         match data {
             Ok(d) => {
                 self.geom = Some(Geometry::new(&d));
+                self.regions = d.regions.clone();
                 self.data = Some(d);
                 self.error = None;
                 self.stale = false;
                 self.selected_inst = None;
                 self.selected_net = None;
                 self.selected_path = None;
+                self.regions_dirty = false;
+                self.pending = None;
                 self.scene_rect = Rect::ZERO; // refit
             }
             Err(e) => self.error = Some(e),
         }
+    }
+
+    /// The floorplan was saved: the regions on screen are now on disk.
+    pub fn saved(&mut self) {
+        self.regions_dirty = false;
     }
 
     pub fn clear(&mut self) {
@@ -402,6 +452,83 @@ impl DeviceView {
             }
         }
 
+        // Floorplan.
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Floorplan").strong());
+            ui.checkbox(&mut self.floorplan, "edit")
+                .on_hover_text("Left-drag on the die to draw a region; right or middle drag pans");
+        });
+        let stats: Vec<Containment> = containment(&self.regions, p);
+        let mut remove = None;
+        for (k, r) in self.regions.iter().enumerate() {
+            let col = geom
+                .and_then(|g| g.colours.get(&r.module).copied())
+                .unwrap_or(Color32::GRAY);
+            ui.horizontal(|ui| {
+                ui.colored_label(col, &r.module);
+                ui.small(r.slice_range());
+                if self.floorplan && ui.small_button("✖").on_hover_text("remove").clicked() {
+                    remove = Some(k);
+                }
+            });
+            if let Some(c) = stats.get(k).filter(|_| !self.regions_dirty) {
+                let total = c.inside + c.outside.len();
+                let txt = format!("last build: {}/{total} slices inside", c.inside);
+                if c.outside.is_empty() {
+                    ui.small(txt);
+                } else {
+                    ui.colored_label(Color32::from_rgb(200, 170, 60), txt)
+                        .on_hover_text("outside slices are outlined in red");
+                }
+            }
+        }
+        if let Some(k) = remove {
+            self.regions.remove(k);
+            self.regions_dirty = true;
+        }
+        if let Some(pending) = self.pending.clone() {
+            ui.label(format!("New region {}", pending.slice_range()));
+            let modules: Vec<String> = p
+                .by_module()
+                .into_keys()
+                .filter(|m| !m.starts_with('<'))
+                .collect();
+            if !modules.contains(&self.pending_module) {
+                self.pending_module = modules.first().cloned().unwrap_or_default();
+            }
+            ui.horizontal(|ui| {
+                egui::ComboBox::from_id_salt("fp_module")
+                    .selected_text(&self.pending_module)
+                    .show_ui(ui, |ui| {
+                        for m in &modules {
+                            ui.selectable_value(&mut self.pending_module, m.clone(), m);
+                        }
+                    });
+                if ui.button("Add").clicked() && !self.pending_module.is_empty() {
+                    let mut r = pending.clone();
+                    r.module = self.pending_module.clone();
+                    self.regions.retain(|x| x.module != r.module);
+                    self.regions.push(r);
+                    self.regions_dirty = true;
+                    self.pending = None;
+                }
+                if ui.button("Cancel").clicked() {
+                    self.pending = None;
+                }
+            });
+        }
+        if self.regions_dirty {
+            ui.horizontal(|ui| {
+                if ui.button("Save floorplan").clicked() {
+                    req = Some(DeviceRequest::SaveFloorplan(self.regions.clone()));
+                }
+                ui.small("then Build to apply");
+            });
+        } else if self.regions.is_empty() && !self.floorplan {
+            ui.small("no regions: tick edit to draw one");
+        }
+
         // Critical paths.
         ui.separator();
         ui.label(RichText::new("Critical paths").strong());
@@ -499,13 +626,50 @@ impl DeviceView {
         let mut rect = self.scene_rect;
         let mut clicked: Option<Pos2> = None;
         let mut hover_pos: Option<Pos2> = None;
+        let floorplan = self.floorplan;
+        let mut drag = self.drag;
+        let mut drawn: Option<(Pos2, Pos2)> = None;
+        let pan = if floorplan {
+            egui::DragPanButtons::SECONDARY | egui::DragPanButtons::MIDDLE
+        } else {
+            egui::DragPanButtons::all()
+        };
+        let outside: Vec<String> = l
+            .placed
+            .as_ref()
+            .filter(|_| !self.regions_dirty)
+            .map(|p| {
+                containment(&self.regions, p)
+                    .into_iter()
+                    .flat_map(|c| c.outside.into_iter().map(|(_, site)| site))
+                    .collect()
+            })
+            .unwrap_or_default();
         egui::Scene::new()
             .zoom_range(0.05..=24.0)
+            .drag_pan_buttons(pan)
             .show(ui, &mut rect, |ui| {
-                let resp = ui.allocate_rect(g.extent, Sense::click());
+                let sense = if floorplan {
+                    Sense::click_and_drag()
+                } else {
+                    Sense::click()
+                };
+                let resp = ui.allocate_rect(g.extent, sense);
                 hover_pos = resp.hover_pos();
                 if resp.clicked() {
                     clicked = resp.hover_pos();
+                }
+                if floorplan {
+                    if resp.drag_started_by(egui::PointerButton::Primary) {
+                        drag = hover_pos.map(|p| (p, p));
+                    } else if resp.dragged_by(egui::PointerButton::Primary) {
+                        if let (Some((a, _)), Some(p)) = (drag, hover_pos) {
+                            drag = Some((a, p));
+                        }
+                    }
+                    if resp.drag_stopped() {
+                        drawn = drag.take();
+                    }
                 }
                 if let Some(site) = hover_pos.and_then(at) {
                     resp.on_hover_text_at_pointer(describe(&site));
@@ -547,6 +711,50 @@ impl DeviceView {
                     }
                     self.draw_selection(painter, p, g);
                 }
+                // Floorplan regions, the region being drawn, and slices that
+                // the last build put outside their region.
+                for r in &self.regions {
+                    if let Some(rr) = g.region_rect(r) {
+                        let c = g.colours.get(&r.module).copied().unwrap_or(Color32::GRAY);
+                        painter.rect_filled(rr, 1.0, c.gamma_multiply(0.18));
+                        painter.rect_stroke(
+                            rr,
+                            1.0,
+                            Stroke::new(1.5, c),
+                            egui::StrokeKind::Outside,
+                        );
+                        painter.text(
+                            rr.left_top() + Vec2::new(2.0, 2.0),
+                            egui::Align2::LEFT_TOP,
+                            &r.module,
+                            egui::FontId::proportional(S * 0.9),
+                            c,
+                        );
+                    }
+                }
+                for site in &outside {
+                    if let Some(r) = g.sites.get(site) {
+                        painter.rect_stroke(
+                            *r,
+                            0.5,
+                            Stroke::new(1.0, Color32::from_rgb(255, 60, 50)),
+                            egui::StrokeKind::Outside,
+                        );
+                    }
+                }
+                let ghost = Stroke::new(1.2, ui.visuals().text_color());
+                if let Some((a, b)) = drag {
+                    painter.rect_stroke(
+                        Rect::from_two_pos(a, b),
+                        0.0,
+                        ghost,
+                        egui::StrokeKind::Middle,
+                    );
+                }
+                if let Some(rr) = self.pending.as_ref().and_then(|r| g.region_rect(r)) {
+                    painter.rect_stroke(rr, 1.0, ghost, egui::StrokeKind::Outside);
+                }
+
                 if let Some(k) = self.selected_path {
                     if let Some(path) = l.paths.get(k) {
                         let mut pts: Vec<Pos2> = Vec::new();
@@ -577,6 +785,14 @@ impl DeviceView {
                 }
             });
         self.scene_rect = rect;
+        self.drag = drag;
+        if let Some((a, b)) = drawn {
+            if let (Some(sa), Some(sb)) = (g.slice_at(a), g.slice_at(b)) {
+                if a.distance(b) > S * 0.5 {
+                    self.pending = Some(Region::new("", sa, sb));
+                }
+            }
+        }
 
         self.hover = hover_pos.and_then(at);
         if let (Some(pos), Some(p)) = (clicked, &l.placed) {

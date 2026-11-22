@@ -259,6 +259,33 @@ impl App {
         }
     }
 
+    fn save_floorplan(&mut self, regions: &[fpgaflow_flow::layout_model::floorplan::Region]) {
+        let (Some(project), Some(data)) = (self.project.clone(), self.device.data.clone()) else {
+            return;
+        };
+        match fpgaflow_flow::save_floorplan(&project, &data.device, regions) {
+            Ok(path) => {
+                self.device.saved();
+                self.note(format!(
+                    "floorplan: {} region(s) written to {}; Build to apply",
+                    regions.len(),
+                    fpgaflow_flow::rel(&project, &path).display()
+                ));
+                // The file may be newly listed in fpgaflow.toml.
+                match Project::load(&project.root) {
+                    Ok(p) => self.project = Some(p),
+                    Err(e) => self.message = Some((false, format!("fpgaflow.toml: {e}"))),
+                }
+                if let Some(st) = self.status.get_mut(&Slot::Build) {
+                    if *st == Status::Ok {
+                        *st = Status::Stale;
+                    }
+                }
+            }
+            Err(e) => self.message = Some((false, format!("floorplan: {e:#}"))),
+        }
+    }
+
     fn load_pins(&mut self) {
         let Some(project) = self.project.clone() else {
             return;
@@ -834,8 +861,10 @@ impl App {
                 if self.device.stale && !self.device.loading && self.running.is_none() {
                     self.load_layout();
                 }
-                if let Some(DeviceRequest::Load) = self.device.ui(ui) {
-                    self.load_layout();
+                match self.device.ui(ui) {
+                    Some(DeviceRequest::Load) => self.load_layout(),
+                    Some(DeviceRequest::SaveFloorplan(regions)) => self.save_floorplan(&regions),
+                    None => {}
                 }
             }
             Tab::Pins => match self.pins.ui(ui) {

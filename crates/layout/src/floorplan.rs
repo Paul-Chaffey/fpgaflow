@@ -120,20 +120,29 @@ static SLICE_RANGE: LazyLock<Regex> =
 /// Regions in a floorplan file.
 pub fn parse(text: &str) -> Vec<Region> {
     let mut module_of_group: BTreeMap<String, String> = BTreeMap::new();
-    let mut ranges: Vec<(String, (u32, u32), (u32, u32))> = Vec::new();
+    // (group, corner, corner); the module comes from the group's INST line.
+    let mut ranges: Vec<(String, Region)> = Vec::new();
     for line in text.lines().map(|l| l.split('#').next().unwrap_or("")) {
         if let Some(c) = INST_AG.captures(line) {
             module_of_group.insert(c[2].to_string(), c[1].to_string());
         } else if let Some(c) = AG_RANGE.captures(line) {
             if let Some(r) = SLICE_RANGE.captures(&c[2]) {
                 let n = |i: usize| r[i].parse::<u32>().unwrap_or(0);
-                ranges.push((c[1].to_string(), (n(1), n(2)), (n(3), n(4))));
+                ranges.push((
+                    c[1].to_string(),
+                    Region::new("", (n(1), n(2)), (n(3), n(4))),
+                ));
             }
         }
     }
     ranges
         .into_iter()
-        .filter_map(|(g, a, b)| module_of_group.get(&g).map(|m| Region::new(m, a, b)))
+        .filter_map(|(g, r)| {
+            module_of_group.get(&g).map(|m| Region {
+                module: m.clone(),
+                ..r
+            })
+        })
         .collect()
 }
 
