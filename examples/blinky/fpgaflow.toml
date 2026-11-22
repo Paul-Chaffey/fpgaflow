@@ -1,0 +1,26 @@
+[project]
+name = "blinky"
+top = "blinky"
+
+[sources]
+rtl = ["rtl/**/*.sv"]
+tb = ["tb/**/*.sv"]
+
+[sim]
+tool = "icarus"        # or "verilator"
+tb_top = "tb_blinky"
+wave = "fst"
+
+# Spartan-3AN Starter Kit (XC3S700AN-4FGG484). No open-source bitstream
+# exists for Spartan-3, so P&R and bitgen go through Xilinx ISE 14.7.
+[target]
+board = "s3an-starter"
+family = "spartan3a"
+device = "xc3s700an"
+package = "fgg484"
+speed = "4"
+backend = "ise"
+constraints = []
+
+[program]
+mode = "sram"

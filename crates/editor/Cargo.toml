@@ -1,0 +1,14 @@
+[package]
+name = "fpgaflow-editor"
+description = "External editor launcher for fpgaflow (Kate, KWrite, VS Code, gVim, Emacs, custom)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+fpgaflow-core.workspace = true
+shell-words.workspace = true
+thiserror.workspace = true
