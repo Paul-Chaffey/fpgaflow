@@ -279,6 +279,11 @@ impl DeviceView {
         }
     }
 
+    /// Open in floorplan editing mode (Tools › Floorplanner).
+    pub fn start_floorplan(&mut self) {
+        self.floorplan = true;
+    }
+
     /// The floorplan was saved: the regions on screen are now on disk.
     pub fn saved(&mut self) {
         self.regions_dirty = false;

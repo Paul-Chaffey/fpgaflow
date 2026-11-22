@@ -612,6 +612,32 @@ impl App {
                 }
             });
             ui.menu_button("Tools", |ui| {
+                if ui
+                    .button("Device view")
+                    .on_hover_text("Where the last build placed things, routing, critical paths")
+                    .clicked()
+                {
+                    ui.close();
+                    self.tab = Tab::Device;
+                }
+                if ui
+                    .button("Pin planner")
+                    .on_hover_text("Assign ports to package pins")
+                    .clicked()
+                {
+                    ui.close();
+                    self.tab = Tab::Pins;
+                }
+                if ui
+                    .button("Floorplanner")
+                    .on_hover_text("Draw regions that confine modules (Device tab, edit mode)")
+                    .clicked()
+                {
+                    ui.close();
+                    self.tab = Tab::Device;
+                    self.device.start_floorplan();
+                }
+                ui.separator();
                 if ui.button("Re-scan tools (Doctor)").clicked() {
                     ui.close();
                     self.doctor = None;
@@ -857,6 +883,12 @@ impl App {
             Tab::Claude => self.ai_view(ui),
             Tab::Problems => self.problems_view(ui),
             Tab::Reports => self.reports_view(ui),
+            Tab::Device | Tab::Pins if self.project.is_none() => {
+                ui.label("No project open: use Project › Open project… (or New project…).");
+                ui.small(
+                    "The Device and Pins tabs show the open project's chip, placement and pins.",
+                );
+            }
             Tab::Device => {
                 if self.device.stale && !self.device.loading && self.running.is_none() {
                     self.load_layout();
