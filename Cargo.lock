@@ -208,6 +208,7 @@ dependencies = [
  "fpgaflow-editor",
  "fpgaflow-hdl",
  "fpgaflow-pnr",
+ "fpgaflow-program",
  "fpgaflow-sim",
  "fpgaflow-synth",
  "serde_json",
@@ -263,6 +264,15 @@ dependencies = [
  "fpgaflow-hdl",
  "regex",
  "serde",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
+name = "fpgaflow-program"
+version = "0.1.0"
+dependencies = [
+ "fpgaflow-core",
  "tempfile",
  "thiserror",
 ]

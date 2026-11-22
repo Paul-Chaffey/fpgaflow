@@ -411,3 +411,46 @@ pub fn build(
     }
     Ok(())
 }
+
+pub fn program(dir: &Path, cfg: &UserConfig, bit: Option<std::path::PathBuf>) -> Result<()> {
+    let project = Project::find(dir)?;
+    let board = fpgaflow_program::project_board(&project)?;
+    let bit = bit
+        .map(|b| dir.join(b))
+        .unwrap_or_else(|| fpgaflow_program::default_bitstream(&project));
+    eprintln!(
+        "== program: {} -> {} (SRAM, volatile)",
+        fpgaflow_sim::rel(&project, &bit).display(),
+        board.name
+    );
+    let plan = fpgaflow_program::plan_program(&project, cfg, &bit)?;
+    let s = run_plan(&plan)?;
+    report(&project, &s);
+    if !s.ok {
+        bail!("programming failed");
+    }
+    eprintln!("loaded");
+    Ok(())
+}
+
+pub fn detect(dir: &Path, cfg: &UserConfig) -> Result<()> {
+    let project = Project::find(dir)?;
+    let board = fpgaflow_program::project_board(&project)?;
+    let plan = fpgaflow_program::plan_detect(board, cfg, &project.stage_dir("program"))?;
+    let s = run_plan(&plan)?;
+    if !s.ok {
+        bail!("JTAG scan failed");
+    }
+    Ok(())
+}
+
+pub fn boards() -> Result<()> {
+    for b in fpgaflow_core::board::boards() {
+        println!("{:<14} {}", b.id, b.name);
+        println!(
+            "               {}-{}-{} via {}, cable {}",
+            b.device, b.speed, b.package, b.backend, b.program.cable
+        );
+    }
+    Ok(())
+}

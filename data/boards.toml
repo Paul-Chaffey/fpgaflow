@@ -1,0 +1,28 @@
+# Dev board profiles. Each entry was verified on real hardware unless marked.
+#
+# program.cable        openFPGALoader cable name (-c)
+# program.firmware     FX2 firmware for cables that need it; "ise:<file>" is
+#                      resolved in ISE's bin/lin64 directory
+# program.freq         JTAG clock in Hz (openFPGALoader may round it)
+# program.index_chain  position of the FPGA in the JTAG chain
+# usb                  VID:PID pairs the board's programmer shows up as
+
+[[board]]
+id = "s3an-starter"
+name = "Xilinx Spartan-3AN Starter Kit (HW-SPAR3AN-SK-UNI-G)"
+family = "spartan3a"
+device = "xc3s700an"
+package = "fgg484"
+speed = "4"
+backend = "ise"
+ucf = "boards/s3an-starter.ucf"
+usb = ["03fd:000d", "03fd:0008"]
+# Verified 2026-11-22: blinky loaded to SRAM. At 6 MHz the IDCODE read
+# overflowed (LIBUSB_ERROR_OVERFLOW); 750 kHz is reliable. The chain holds
+# the FPGA (index 0) and an XCF04S Platform Flash (index 1). Needs an
+# openFPGALoader with the XC3S700AN part entry (IDCODE 0x02628093).
+[board.program]
+cable = "xilinxPlatformCableUsb_alt"
+firmware = "ise:xusb_emb.hex"
+freq = 750000
+index_chain = 0

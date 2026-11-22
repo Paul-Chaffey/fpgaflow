@@ -89,6 +89,16 @@ enum Cmd {
         #[arg(long)]
         allow_unconstrained: bool,
     },
+    /// Load the bitstream onto the project's board (volatile SRAM load).
+    Program {
+        /// Bitstream to load (default: the one `fpgaflow build` wrote).
+        #[arg(long)]
+        bit: Option<PathBuf>,
+    },
+    /// Read-only JTAG scan of the project's board: lists the devices in the chain.
+    Detect,
+    /// List known dev boards.
+    Boards,
     /// List supported FPGA families and their P&R backends.
     Families,
     /// Elaborate the RTL with Yosys and print the module hierarchy and ports.
@@ -129,6 +139,9 @@ fn main() -> Result<()> {
             flow::synth(&cli.dir, &cfg, family.as_deref(), backend.as_deref())
         }
         Cmd::Families => flow::families(),
+        Cmd::Program { bit } => flow::program(&cli.dir, &cfg, bit),
+        Cmd::Detect => flow::detect(&cli.dir, &cfg),
+        Cmd::Boards => flow::boards(),
         Cmd::Build {
             family,
             backend,

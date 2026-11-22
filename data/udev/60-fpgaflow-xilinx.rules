@@ -1,0 +1,11 @@
+# fpgaflow: user access to Xilinx USB JTAG cables (USB vendor 03fd) for
+# openFPGALoader, without root. Install:
+#   sudo cp 60-fpgaflow-xilinx.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger --subsystem-match=usb --attr-match=idVendor=03fd
+#
+# Covers the cable both before its FX2 firmware is loaded (e.g. 03fd:000d,
+# the embedded cable on the Spartan-3A/3AN Starter Kit) and after
+# (03fd:0008), since openFPGALoader loads the firmware itself and the cable
+# then re-enumerates. openFPGALoader's own rules file has no 03fd entries.
+SUBSYSTEM=="usb", ATTR{idVendor}=="03fd", MODE="0660", GROUP="plugdev", TAG+="uaccess"

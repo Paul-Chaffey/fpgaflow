@@ -34,3 +34,4 @@ fpgaflow-hdl = { path = "crates/hdl" }
 fpgaflow-sim = { path = "crates/sim" }
 fpgaflow-synth = { path = "crates/synth" }
 fpgaflow-pnr = { path = "crates/pnr" }
+fpgaflow-program = { path = "crates/program" }

@@ -24,6 +24,9 @@ impl Default for UserConfig {
             editor: EditorConfig::default(),
             tool_paths: BTreeMap::new(),
             search_paths: vec![
+                // openFPGALoader built with the XC3S700AN part entry; first so
+                // it wins over the OSS CAD Suite copy.
+                home.join("tools/openfpgaloader-fpgaflow/bin"),
                 home.join("tools/oss-cad-suite/bin"),
                 home.join("Xilinx/14.7/ISE_DS/ISE/bin/lin64"),
                 PathBuf::from("/opt/Xilinx/14.7/ISE_DS/ISE/bin/lin64"),

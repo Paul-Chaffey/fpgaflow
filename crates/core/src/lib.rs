@@ -2,6 +2,7 @@
 //! configuration, the external-tool registry ("Doctor") and the async job
 //! runner that every flow stage uses to run tools.
 
+pub mod board;
 pub mod config;
 pub mod diag;
 pub mod family;

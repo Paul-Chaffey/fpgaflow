@@ -346,7 +346,10 @@ pub fn host_checks() -> Vec<HostCheck> {
     .flatten()
     .filter_map(Result::ok)
     .map(|e| e.file_name().to_string_lossy().into_owned())
-    .filter(|n| n.to_lowercase().contains("openfpgaloader"))
+    .filter(|n| {
+        let n = n.to_lowercase();
+        n.contains("openfpgaloader") || n.contains("fpgaflow")
+    })
     .collect();
 
     let lz4 = Path::new("/usr/include/lz4.h").is_file();
@@ -374,16 +377,16 @@ pub fn host_checks() -> Vec<HostCheck> {
                 .then(|| "sudo usermod -aG plugdev $USER   (then log out and in)".into()),
         },
         HostCheck {
-            name: "openFPGALoader udev rules",
+            name: "USB JTAG udev rules",
             ok: !rules.is_empty(),
             detail: if rules.is_empty() {
-                "no openFPGALoader rules installed".into()
+                "no fpgaflow or openFPGALoader rules installed".into()
             } else {
                 rules.join(", ")
             },
             fix: rules.is_empty().then(|| {
-                "sudo cp <openFPGALoader>/99-openfpgaloader.rules /etc/udev/rules.d/ && \
-                 sudo udevadm control --reload-rules && sudo udevadm trigger"
+                "sudo cp data/udev/60-fpgaflow-xilinx.rules /etc/udev/rules.d/ && \
+                 sudo udevadm control --reload-rules, then replug the board's USB cable"
                     .into()
             }),
         },

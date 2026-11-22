@@ -41,6 +41,9 @@ Early development. Working today, from the CLI:
 | `fpgaflow synth [--family F] [--backend B]` | Yosys synthesis for the target; utilisation by resource type; netlist in the backend's format |
 | `fpgaflow families` | the 24 supported families and their P&R backends |
 | `fpgaflow build` | synthesis → place & route → timing → bitstream (ISE backend today) |
+| `fpgaflow detect` | read-only JTAG scan of the project's board |
+| `fpgaflow program` | load the bitstream into the FPGA (SRAM, volatile) |
+| `fpgaflow boards` | known dev boards |
 | `fpgaflow edit [file] [--line N --col N]` | open in the configured editor (Kate by default) |
 
 Compiler errors from Icarus, Verilator and Yosys are reported as
@@ -55,7 +58,27 @@ themselves: an unconstrained pin can drive a net wired to something else on
 the board. `examples/blinky/constraints/s3an-starter.ucf` and the master
 `data/boards/s3an-starter.ucf` use the pin constraints printed in AMD's UG334.
 
-nextpnr/VPR backends, programming, the GUI and the Claude integration are next.
+**Verified on hardware:** blinky on a Spartan-3AN Starter Kit, built with Yosys
+and ISE, loaded with openFPGALoader over the board's embedded Xilinx USB
+cable: LED0 blinks and BTN_SOUTH resets it.
+
+nextpnr/VPR backends, live board detection, the GUI and the Claude integration
+are next.
+
+## Programming the Spartan-3AN Starter Kit
+
+1. **Power:** use a regulated 5 V supply (UG334 ch. 17). A weak adapter makes the
+   board brown out, and the embedded USB cable (on a 1.8 V LDO from the 5 V
+   rail) drops off USB every few seconds.
+2. **USB access:** install the udev rule, then replug the USB cable:
+   `sudo cp data/udev/60-fpgaflow-xilinx.rules /etc/udev/rules.d/ && sudo udevadm control --reload-rules`.
+   openFPGALoader's own rules have no entry for Xilinx cables (USB vendor `03fd`).
+3. **openFPGALoader with the XC3S700AN entry:** `scripts/build-openfpgaloader.sh`
+   (stock v1.2.0 reads the IDCODE but has no part entry for it). openFPGALoader
+   loads the cable's FX2 firmware (`xusb_emb.hex` from ISE) itself; the cable
+   then re-enumerates from `03fd:000d` to `03fd:0008`.
+4. `fpgaflow build && fpgaflow program`. The JTAG clock is 750 kHz: at 6 MHz
+   this cable's IDCODE reads overflowed.
 
 ## Quick start
 
@@ -118,7 +141,7 @@ mode = "sram"          # or "flash"
    - then VPR (generic arch, F4PGA xc7)
    - then Gowin, Nexus, Mistral and openXC7
    - then the other vendor adapters
-5. Programming and live board detection (udev)
+5. Programming *(done for the Spartan-3AN kit)* and live board detection (udev)
 6. Claude integration (API and Claude Code CLI)
 7. egui GUI over all of the above, plus packaging
 
