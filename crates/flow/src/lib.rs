@@ -282,7 +282,17 @@ pub async fn build(
     // 5. Bitstream.
     let mode = project.file.program.mode;
     ctx.note(format!("bitstream ({mode:?} load)"));
-    let summary = ctx.run(&ise::plan_bitstream(&ip, mode)).await?;
+    let board_bitgen = project
+        .file
+        .target
+        .as_ref()
+        .and_then(|t| t.board.as_deref())
+        .and_then(fpgaflow_core::board::board)
+        .map(|b| b.bitgen.clone())
+        .unwrap_or_default();
+    let summary = ctx
+        .run(&ise::plan_bitstream(&ip, mode, &board_bitgen))
+        .await?;
     let bit_ok = summary.ok;
     out.stages.push(summary);
     if !bit_ok {

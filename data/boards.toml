@@ -1,11 +1,13 @@
 # Dev board profiles. Each entry was verified on real hardware unless marked.
 #
+# program.method       "openfpgaloader" (default) or "celoxica" (fpgaflow-celoxica)
 # program.cable        openFPGALoader cable name (-c)
 # program.firmware     FX2 firmware for cables that need it; "ise:<file>" is
 #                      resolved in ISE's bin/lin64 directory
 # program.freq         JTAG clock in Hz (openFPGALoader may round it)
 # program.index_chain  position of the FPGA in the JTAG chain
-# usb                  VID:PID pairs the board's programmer shows up as
+# usb                  VID:PID pairs that mean the board is connected
+# bitgen               extra ISE bitgen -g options; a StartupClk here wins
 
 [[board]]
 id = "s3an-starter"
@@ -45,7 +47,17 @@ usb = ["107a:9005"]
 # Pins from the Celoxica RC10 manual, section 3; all 183 LOCs checked against
 # ISE's xc3s1500fg320 package file. The manual says XC3S1500L-4FG320; this
 # board's chip reads XC3S1500 (both have IDCODE 0x01434093).
-# Programming: the USB port speaks Celoxica's FTU3 protocol (Windows only),
-# so programming goes through the board's JTAG connector, where the FPGA is
-# alone on the chain (manual 3.19). No [board.program] until a cable is
-# chosen and tested.
+# The FX2 loads the FPGA in slave SelectMAP mode and drives CCLK, so the
+# bitstream starts on CCLK; the other options are Celoxica's (manual 2.9).
+# LCK_cycle stays NoWait: Celoxica's 5 would hang start-up in designs
+# without a DCM.
+bitgen = [
+    "StartupClk:Cclk", "DONE_cycle:6", "GTS_cycle:4", "GWE_cycle:Done",
+    "DonePin:PullUp", "M0Pin:PullDown", "M1Pin:PullUp", "M2Pin:PullUp",
+    "CclkPin:PullNone", "ProgPin:PullNone", "DriveDone:Yes",
+]
+# Verified 2026-11-22: blinky loaded over the board's USB port (protocol
+# read from Celoxica PDK 4.1; see crates/celoxica). The JTAG connector
+# (FPGA alone on the chain, manual 3.19) is an alternative with a cable.
+[board.program]
+method = "celoxica"

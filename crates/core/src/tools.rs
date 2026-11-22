@@ -211,6 +211,13 @@ pub const TOOLS: &[ToolSpec] = &[
         "Universal FPGA programmer",
     ),
     t(
+        "fpgaflow-celoxica",
+        "fpgaflow-celoxica",
+        &["--version"],
+        Stage::Program,
+        "Celoxica RC10 programmer over its own USB port (part of fpgaflow)",
+    ),
+    t(
         "claude",
         "claude",
         &["--version"],
@@ -241,8 +248,13 @@ pub fn locate(spec: &ToolSpec, cfg: &UserConfig) -> Option<PathBuf> {
     if let Some(p) = cfg.tool_paths.get(spec.id) {
         return is_executable(p).then(|| p.clone());
     }
-    cfg.search_paths
+    // fpgaflow's own helper tools are installed (and built) next to it.
+    let own_dir = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(Path::to_path_buf));
+    own_dir
         .iter()
+        .chain(cfg.search_paths.iter())
         .map(|dir| dir.join(spec.exe))
         .find(|p| is_executable(p))
         .or_else(|| which::which(spec.exe).ok())

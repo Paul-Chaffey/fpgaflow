@@ -41,7 +41,7 @@ Early development. Working today, from the CLI:
 | `fpgaflow synth [--family F] [--backend B]` | Yosys synthesis for the target; utilisation by resource type; netlist in the backend's format |
 | `fpgaflow families` | the 24 supported families and their P&R backends |
 | `fpgaflow build` | synthesis → place & route → timing → bitstream (ISE backend today) |
-| `fpgaflow detect` | read-only JTAG scan of the project's board |
+| `fpgaflow detect` | read-only check of the project's board (JTAG scan, or the RC10's DONE status) |
 | `fpgaflow program` | load the bitstream into the FPGA (SRAM, volatile) |
 | `fpgaflow boards` | known dev boards |
 | `fpgaflow usb` | scan USB: known boards and openFPGALoader-supported cables |
@@ -60,9 +60,12 @@ themselves: an unconstrained pin can drive a net wired to something else on
 the board. `examples/blinky/constraints/s3an-starter.ucf` and the master
 `data/boards/s3an-starter.ucf` use the pin constraints printed in AMD's UG334.
 
-**Verified on hardware:** blinky on a Spartan-3AN Starter Kit, built with Yosys
-and ISE, loaded with openFPGALoader over the board's embedded Xilinx USB
-cable: LED0 blinks and BTN_SOUTH resets it.
+**Verified on hardware:**
+- Spartan-3AN Starter Kit: blinky built with Yosys and ISE, loaded with
+  openFPGALoader over the board's embedded Xilinx USB cable. LED0 blinks and
+  BTN_SOUTH resets it.
+- Celoxica RC10: blinky built with Yosys and ISE, loaded over the board's own
+  USB port with `fpgaflow-celoxica`. LED0 blinks.
 
 nextpnr/VPR backends, live board detection, the GUI and the Claude integration
 are next.
@@ -84,6 +87,27 @@ are next.
    then re-enumerates from `03fd:000d` to `03fd:0008`.
 4. `fpgaflow build && fpgaflow program`. The JTAG clock is 750 kHz: at 6 MHz
    this cable's IDCODE reads overflowed.
+
+## Programming the Celoxica RC10
+
+The RC10 (XC3S1500-4FG320) is loaded over **its own USB port**, with no JTAG
+cable and no Windows: `fpgaflow-celoxica` (built with fpgaflow) speaks the
+board's FX2 protocol, which was read from Celoxica's PDK 4.1 driver and host
+library and verified on an RC10. See `crates/celoxica/src/lib.rs`.
+
+1. **Power:** USB alone runs the board. The PC-style 4-pin connector (CN18) is
+   only needed for servos, an LCD backlight or the ATA connector's 5 V/12 V.
+2. **USB access:** `sudo cp data/udev/60-fpgaflow-celoxica.rules /etc/udev/rules.d/ && sudo udevadm control --reload-rules`,
+   then replug the board's USB cable.
+3. Set `board = "rc10"` in `fpgaflow.toml` (the New Project dialog copies
+   `data/boards/rc10.ucf`, every pin from the RC10 manual), then
+   `fpgaflow build && fpgaflow program`.
+
+`fpgaflow build` uses the board's bitgen options (start-up on CCLK, which the
+FX2 drives). Loads go into the FPGA only (volatile); `fpgaflow-celoxica`
+never touches the board's flash or FX2 firmware. The reset button next to the
+power connector reloads Celoxica's demo from flash. `fpgaflow-celoxica status`
+shows whether the FPGA is configured.
 
 ## GUI
 

@@ -6,11 +6,25 @@ use serde::Deserialize;
 
 const DATA: &str = include_str!("../../../data/boards.toml");
 
+/// Which tool loads the bitstream.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProgramMethod {
+    /// openFPGALoader over a JTAG cable.
+    #[default]
+    Openfpgaloader,
+    /// `fpgaflow-celoxica` over a Celoxica RC board's own USB port.
+    Celoxica,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProgramProfile {
-    /// openFPGALoader cable name.
-    pub cable: String,
+    #[serde(default)]
+    pub method: ProgramMethod,
+    /// openFPGALoader cable name (required for `openfpgaloader`).
+    #[serde(default)]
+    pub cable: Option<String>,
     /// FX2 firmware; `ise:<file>` means a file in ISE's `bin/lin64`.
     #[serde(default)]
     pub firmware: Option<String>,
@@ -37,9 +51,13 @@ pub struct Board {
     /// `VID:PID` pairs (lower-case hex) that mean the board is connected:
     /// its programmer, or the board's own USB port.
     pub usb: Vec<String>,
-    /// How openFPGALoader reaches the FPGA; `None` until a cable is known.
+    /// How the bitstream gets to the FPGA; `None` until a way is known.
     #[serde(default)]
     pub program: Option<ProgramProfile>,
+    /// Extra bitgen `-g` options (`Name:Value`); a `StartupClk` here
+    /// replaces the one fpgaflow picks from the program mode.
+    #[serde(default)]
+    pub bitgen: Vec<String>,
 }
 
 /// Master constraint files shipped in `data/`, compiled in so a new
@@ -103,6 +121,13 @@ mod tests {
                 "{}: backend not valid for family",
                 b.id
             );
+            if let Some(p) = &b.program {
+                assert!(
+                    p.method != ProgramMethod::Openfpgaloader || p.cable.is_some(),
+                    "{}: openFPGALoader needs a cable",
+                    b.id
+                );
+            }
             assert!(
                 b.ucf_text().is_some(),
                 "{}: UCF {} not compiled in",
@@ -116,7 +141,8 @@ mod tests {
     fn s3an_starter() {
         let b = board("s3an-starter").unwrap();
         let p = b.program.as_ref().unwrap();
-        assert_eq!(p.cable, "xilinxPlatformCableUsb_alt");
+        assert_eq!(p.method, ProgramMethod::Openfpgaloader);
+        assert_eq!(p.cable.as_deref(), Some("xilinxPlatformCableUsb_alt"));
         assert_eq!(p.freq, Some(750_000));
         assert!(b.matches_usb(0x03fd, 0x000d));
         assert!(b.matches_usb(0x03fd, 0x0008));
@@ -135,7 +161,8 @@ mod tests {
             ("xc3s1500", "fg320")
         );
         assert!(b.matches_usb(0x107a, 0x9005));
-        assert!(b.program.is_none(), "its USB port is not a JTAG cable");
+        assert_eq!(b.program.as_ref().unwrap().method, ProgramMethod::Celoxica);
+        assert!(b.bitgen.iter().any(|g| g == "StartupClk:Cclk"));
         let ucf = b.ucf_text().unwrap();
         assert!(ucf.contains(r#"NET "CLK_48MHZ" LOC = "P10""#));
         assert!(ucf.contains(r#"NET "LED<0>" LOC = "D2""#));

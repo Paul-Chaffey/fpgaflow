@@ -339,12 +339,19 @@ pub fn boards() -> Result<()> {
     for b in fpgaflow_core::board::boards() {
         println!("{:<14} {}", b.id, b.name);
         println!(
-            "               {}-{}-{} via {}, cable {}",
+            "               {}-{}-{} via {}, programmer {}",
             b.device,
             b.speed,
             b.package,
             b.backend,
-            b.program.as_ref().map_or("none yet", |p| p.cable.as_str())
+            match &b.program {
+                None => "none yet".to_string(),
+                Some(p) => match p.method {
+                    fpgaflow_core::board::ProgramMethod::Celoxica =>
+                        "its own USB port (fpgaflow-celoxica)".to_string(),
+                    _ => p.cable.clone().unwrap_or_default(),
+                },
+            }
         );
     }
     Ok(())

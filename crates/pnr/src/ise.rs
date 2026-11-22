@@ -240,24 +240,29 @@ pub fn plan_implement(
 }
 
 /// Plan bitgen. The start-up clock follows how the bitstream will be loaded:
-/// JTAG for a volatile SRAM load, CCLK when it boots from flash.
-pub fn plan_bitstream(ip: &IsePlan, mode: ProgramMode) -> Plan {
+/// JTAG for a volatile SRAM load, CCLK when it boots from flash. `extra` are
+/// the board's own `-g` options (`Name:Value`); a `StartupClk` among them
+/// wins, for boards loaded over SelectMAP like the Celoxica RC10.
+pub fn plan_bitstream(ip: &IsePlan, mode: ProgramMode, extra: &[String]) -> Plan {
     let f = &ip.files;
     let s = |p: &Path| p.file_name().unwrap().to_string_lossy().into_owned();
     let clk = match mode {
         ProgramMode::Sram => "StartupClk:JtagClk",
         ProgramMode::Flash => "StartupClk:Cclk",
     };
+    let mut args: Vec<String> = vec!["-w".into()];
+    if !extra.iter().any(|g| g.starts_with("StartupClk:")) {
+        args.extend(["-g".into(), clk.into()]);
+    }
+    for g in extra {
+        args.extend(["-g".into(), g.clone()]);
+    }
+    args.extend([s(&f.ncd), s(&f.bit), s(&f.pcf)]);
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
     Plan {
         stage: "bitstream".into(),
         workdir: f.workdir.clone(),
-        jobs: vec![job(
-            &ip.settings,
-            "ise:bitgen",
-            &f.workdir,
-            "bitgen",
-            &["-w", "-g", clk, &s(&f.ncd), &s(&f.bit), &s(&f.pcf)],
-        )],
+        jobs: vec![job(&ip.settings, "ise:bitgen", &f.workdir, "bitgen", &args)],
         outputs: vec![f.bit.clone()],
         verdict_job: None,
         files: vec![],
@@ -460,6 +465,20 @@ mod tests {
             ip.ucf_source_line(line_of("NET d")),
             Some((root.join("b.ucf"), 2))
         );
+
+        // bitgen: the board's StartupClk replaces the mode's default.
+        let args = |extra: &[String]| -> Vec<String> {
+            plan_bitstream(&ip, ProgramMode::Sram, extra).jobs[0]
+                .args
+                .iter()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect()
+        };
+        assert!(args(&[]).contains(&"StartupClk:JtagClk".to_string()));
+        let rc10 = args(&["StartupClk:Cclk".into(), "DONE_cycle:6".into()]);
+        assert!(!rc10.contains(&"StartupClk:JtagClk".to_string()));
+        assert!(rc10.contains(&"StartupClk:Cclk".to_string()));
+        assert!(rc10.contains(&"DONE_cycle:6".to_string()));
     }
 
     #[test]

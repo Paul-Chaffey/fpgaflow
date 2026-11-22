@@ -1,0 +1,6 @@
+# fpgaflow: user access to Celoxica RC boards (USB vendor 107a, e.g. the RC10
+# at 107a:9005) for fpgaflow-celoxica, without root. Install:
+#   sudo cp 60-fpgaflow-celoxica.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+# then replug the board's USB cable.
+SUBSYSTEM=="usb", ATTR{idVendor}=="107a", MODE="0660", GROUP="plugdev", TAG+="uaccess"

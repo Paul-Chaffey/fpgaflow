@@ -1,13 +1,14 @@
-//! Loading bitstreams onto boards with openFPGALoader.
+//! Loading bitstreams onto boards: openFPGALoader over a JTAG cable, or
+//! `fpgaflow-celoxica` over a Celoxica RC board's own USB port.
 //!
 //! The command line comes from the board profile (`data/boards.toml`):
-//! cable, FX2 firmware, JTAG clock and chain position were each found on
-//! real hardware, so they live in data rather than in code.
+//! method, cable, FX2 firmware, JTAG clock and chain position were each
+//! found on real hardware, so they live in data rather than in code.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use fpgaflow_core::board::{self, Board};
+use fpgaflow_core::board::{self, Board, ProgramMethod, ProgramProfile};
 use fpgaflow_core::job::JobSpec;
 use fpgaflow_core::project::{ProgramMode, Project};
 use fpgaflow_core::stage::Plan;
@@ -33,6 +34,10 @@ pub enum ProgramError {
     FlashNotSupported(String),
     #[error("no JTAG cable is set up for the {0} yet (see its notes in data/boards.toml)")]
     NoProgrammer(String),
+    #[error(
+        "fpgaflow-celoxica is not installed (it is built with fpgaflow; run `fpgaflow doctor`)"
+    )]
+    NoCeloxicaTool,
 }
 
 pub fn project_board(project: &Project) -> Result<&'static Board, ProgramError> {
@@ -60,12 +65,23 @@ pub fn resolve_firmware(spec: &str, cfg: &UserConfig) -> Result<PathBuf, Program
     }
 }
 
-fn cable_args(b: &Board, cfg: &UserConfig) -> Result<Vec<String>, ProgramError> {
-    let p = b
-        .program
+fn profile(b: &Board) -> Result<&ProgramProfile, ProgramError> {
+    b.program
         .as_ref()
+        .ok_or_else(|| ProgramError::NoProgrammer(b.name.clone()))
+}
+
+fn celoxica(cfg: &UserConfig) -> Result<PathBuf, ProgramError> {
+    tools::resolve("fpgaflow-celoxica", cfg).ok_or(ProgramError::NoCeloxicaTool)
+}
+
+fn cable_args(b: &Board, cfg: &UserConfig) -> Result<Vec<String>, ProgramError> {
+    let p = profile(b)?;
+    let cable = p
+        .cable
+        .clone()
         .ok_or_else(|| ProgramError::NoProgrammer(b.name.clone()))?;
-    let mut a = vec!["-c".to_string(), p.cable.clone()];
+    let mut a = vec!["-c".to_string(), cable];
     if let Some(fw) = &p.firmware {
         a.push("--probe-firmware".into());
         a.push(resolve_firmware(fw, cfg)?.display().to_string());
@@ -107,10 +123,15 @@ pub fn plan_program(project: &Project, cfg: &UserConfig, bit: &Path) -> Result<P
         return Err(ProgramError::NoBitstream(bit.to_path_buf()));
     }
     let workdir = project.stage_dir("program");
-    let job = JobSpec::new("program", loader(cfg)?, &workdir)
-        .args(cable_args(b, cfg)?)
-        .arg(bit)
-        .timeout(PROGRAM_TIMEOUT);
+    let job = match profile(b)?.method {
+        ProgramMethod::Openfpgaloader => JobSpec::new("program", loader(cfg)?, &workdir)
+            .args(cable_args(b, cfg)?)
+            .arg(bit),
+        ProgramMethod::Celoxica => JobSpec::new("program", celoxica(cfg)?, &workdir)
+            .arg("load")
+            .arg(bit),
+    }
+    .timeout(PROGRAM_TIMEOUT);
     Ok(Plan {
         stage: "program".into(),
         workdir,
@@ -123,15 +144,20 @@ pub fn plan_program(project: &Project, cfg: &UserConfig, bit: &Path) -> Result<P
 
 /// Plan a read-only JTAG scan (`--detect`) of a board.
 pub fn plan_detect(b: &Board, cfg: &UserConfig, workdir: &Path) -> Result<Plan, ProgramError> {
-    let mut args = cable_args(b, cfg)?;
-    // --detect lists the whole chain; the chain index only matters for loading.
-    if let Some(i) = args.iter().position(|a| a == "--index-chain") {
-        args.drain(i..i + 2);
+    let job = match profile(b)?.method {
+        ProgramMethod::Openfpgaloader => {
+            let mut args = cable_args(b, cfg)?;
+            // --detect lists the whole chain; the chain index only matters for loading.
+            if let Some(i) = args.iter().position(|a| a == "--index-chain") {
+                args.drain(i..i + 2);
+            }
+            JobSpec::new("detect", loader(cfg)?, workdir)
+                .args(args)
+                .arg("--detect")
+        }
+        ProgramMethod::Celoxica => JobSpec::new("detect", celoxica(cfg)?, workdir).arg("status"),
     }
-    let job = JobSpec::new("detect", loader(cfg)?, workdir)
-        .args(args)
-        .arg("--detect")
-        .timeout(DETECT_TIMEOUT);
+    .timeout(DETECT_TIMEOUT);
     Ok(Plan {
         stage: "detect".into(),
         workdir: workdir.to_path_buf(),

@@ -12,6 +12,7 @@ cargo="$(command -v cargo || echo "$HOME/.cargo/bin/cargo")"
 files=(
   "$bin/fpgaflow-gui"
   "$bin/fpgaflow"
+  "$bin/fpgaflow-celoxica"
   "$data/applications/fpgaflow.desktop"
   "$data/desktop-directories/fpgaflow-engineering.directory"
   "$conf/menus/applications-merged/fpgaflow-engineering.menu"
@@ -29,9 +30,10 @@ if [[ "${1:-}" == "--uninstall" ]]; then
   exit 0
 fi
 
-"$cargo" build --release --manifest-path "$repo/Cargo.toml" -p fpgaflow-gui -p fpgaflow-cli
+"$cargo" build --release --manifest-path "$repo/Cargo.toml" -p fpgaflow-gui -p fpgaflow-cli -p fpgaflow-celoxica
 install -Dm755 "$repo/target/release/fpgaflow-gui" "$bin/fpgaflow-gui"
 install -Dm755 "$repo/target/release/fpgaflow" "$bin/fpgaflow"
+install -Dm755 "$repo/target/release/fpgaflow-celoxica" "$bin/fpgaflow-celoxica"
 
 for d in "$repo"/data/icons/hicolor/*/; do
   install -Dm644 "$d/apps/fpgaflow.png" "$data/icons/hicolor/$(basename "$d")/apps/fpgaflow.png"

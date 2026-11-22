@@ -1,0 +1,17 @@
+[package]
+name = "fpgaflow-celoxica"
+description = "Load FPGA bitstreams into Celoxica RC10 boards over their own USB port"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "fpgaflow-celoxica"
+path = "src/main.rs"
+
+[dependencies]
+rusb = "0.9"
+thiserror.workspace = true
