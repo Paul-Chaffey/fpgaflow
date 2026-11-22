@@ -17,6 +17,8 @@ fpgaflow program          # load over the RC10's USB port (volatile)
 ```
 
 Plug headphones or powered speakers into the RC10's audio output.
+Verified on an RC10 (2026-11-22): the tunes, note names and display
+orientation are right.
 
 ## How it works
 

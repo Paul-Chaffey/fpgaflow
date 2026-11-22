@@ -53,7 +53,8 @@ NET "LED<5>" LOC = "F2" | IOSTANDARD = LVCMOS25 | SLEW = SLOW | DRIVE = 8 ;
 NET "LED<6>" LOC = "F4" | IOSTANDARD = LVCMOS25 | SLEW = SLOW | DRIVE = 8 ;
 NET "LED<7>" LOC = "G3" | IOSTANDARD = LVCMOS25 | SLEW = SLOW | DRIVE = 8 ;
 
-# ---- Seven-segment displays (3.5): D4, common cathode, segments active high
+# ---- Seven-segment displays (3.5): D4, common cathode, segments active high.
+#      SEG0 is the left digit, SEG1 the right (checked on the board).
 NET "SEG0_A"  LOC = "H2" | IOSTANDARD = LVCMOS25 ;
 NET "SEG0_B"  LOC = "H3" | IOSTANDARD = LVCMOS25 ;
 NET "SEG0_C"  LOC = "H6" | IOSTANDARD = LVCMOS25 ;

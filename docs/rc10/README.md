@@ -68,6 +68,12 @@ any constraint that uses them and tells ISE to `PROHIBIT` them.
   |---|---|---|---|---|---|---|---|---|---|
   | Signal | TMS | key (cut) | TDI | TDO | n/c | TCK | +3.3 V | GND | +2.5 V (cable VREF) |
 
+## Demo
+
+`examples/rc10-music` plays three tunes with drums on the audio outputs, a
+level meter on the LEDs and patterns on the 7-segment displays. Verified on
+the board 2026-11-22: tunes, note names and display orientation correct.
+
 ## Peripherals
 
 All pins are in `data/boards/rc10.ucf`, checked against the schematic and
@@ -75,7 +81,8 @@ Celoxica's library ([pin-crosscheck.txt](pin-crosscheck.txt),
 [library-pin-lists.txt](library-pin-lists.txt)):
 
 - 8 LEDs, active high through 150 Ω (LED0 rightmost).
-- Two 7-segment digits (common cathode, segments active high).
+- Two 7-segment digits (common cathode, segments active high); SEG0 is the
+  left digit, SEG1 the right (confirmed on the board).
 - 5-way joystick: each switch to ATAv with an external 11 kΩ pull-down.
 - VGA (7 bits per colour, resistor DAC), PS/2 mouse and keyboard, RS-232
   (ICL3222), stereo PWM audio and piezo buzzer, CAN (SN65HVD230), 4 servo PWM
