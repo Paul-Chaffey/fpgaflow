@@ -11,6 +11,6 @@ pub mod project;
 pub mod stage;
 pub mod tools;
 
-pub use config::{EditorConfig, EditorPreset, UserConfig};
+pub use config::{AiBackend, AiConfig, EditorConfig, EditorPreset, UserConfig};
 pub use job::{JobEvent, JobSpec, Outcome, Stream};
 pub use project::{ProgramMode, Project, ProjectError, ProjectFile, SimTool, WaveFormat};

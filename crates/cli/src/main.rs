@@ -7,6 +7,7 @@ use fpgaflow_core::tools::{self, Stage};
 use fpgaflow_core::UserConfig;
 use fpgaflow_editor::Position;
 
+mod ai;
 mod flow;
 
 #[derive(Parser)]
@@ -107,6 +108,15 @@ enum Cmd {
     },
     /// Watch for boards and cables being plugged in or removed (Ctrl-C to stop).
     Watch,
+    /// Ask Claude to write, explain or fix code. Answers are compiled/simulated
+    /// before you see them and saved as a proposal; `ai apply` writes it.
+    Ai {
+        /// Override [ai] backend from config.toml.
+        #[arg(long, global = true, value_parser = ["claude-code", "api"])]
+        backend: Option<String>,
+        #[command(subcommand)]
+        cmd: ai::AiCmd,
+    },
     /// List supported FPGA families and their P&R backends.
     Families,
     /// Elaborate the RTL with Yosys and print the module hierarchy and ports.
@@ -152,6 +162,7 @@ fn main() -> Result<()> {
         Cmd::Boards => flow::boards(),
         Cmd::Usb { all } => flow::usb(&cfg, all),
         Cmd::Watch => flow::watch(&cfg),
+        Cmd::Ai { backend, cmd } => ai::run(&cli.dir, &cfg, backend.as_deref(), cmd),
         Cmd::Build {
             family,
             backend,

@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 #[serde(default, deny_unknown_fields)]
 pub struct UserConfig {
     pub editor: EditorConfig,
+    pub ai: AiConfig,
     /// Explicit path for a tool, keyed by tool id (see `tools::TOOLS`).
     pub tool_paths: BTreeMap<String, PathBuf>,
     /// Directories searched before `$PATH`, e.g. the OSS CAD Suite and ISE.
@@ -22,6 +23,7 @@ impl Default for UserConfig {
         let home = dirs::home_dir().unwrap_or_default();
         Self {
             editor: EditorConfig::default(),
+            ai: AiConfig::default(),
             tool_paths: BTreeMap::new(),
             search_paths: vec![
                 // openFPGALoader built with the XC3S700AN part entry; first so
@@ -31,6 +33,44 @@ impl Default for UserConfig {
                 home.join("Xilinx/14.7/ISE_DS/ISE/bin/lin64"),
                 PathBuf::from("/opt/Xilinx/14.7/ISE_DS/ISE/bin/lin64"),
             ],
+        }
+    }
+}
+
+/// Which route to Claude to use.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum AiBackend {
+    /// The Claude Code CLI (`claude -p`), using its existing login.
+    #[default]
+    ClaudeCode,
+    /// The Anthropic Messages API over HTTPS, with an API key.
+    Api,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct AiConfig {
+    pub backend: AiBackend,
+    pub model: String,
+    /// `low`, `medium`, `high`, `xhigh` or `max`.
+    pub effort: String,
+    /// Command that prints the API key (e.g. a KWallet or `pass` lookup).
+    /// Used when `ANTHROPIC_API_KEY` is not set; the key is never stored here.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key_command: Option<String>,
+    /// How many times generated code is sent back with its compile/sim errors.
+    pub max_fix_rounds: u32,
+}
+
+impl Default for AiConfig {
+    fn default() -> Self {
+        Self {
+            backend: AiBackend::ClaudeCode,
+            model: "claude-opus-5-5".into(),
+            effort: "high".into(),
+            api_key_command: None,
+            max_fix_rounds: 3,
         }
     }
 }

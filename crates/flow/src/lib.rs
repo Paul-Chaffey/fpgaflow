@@ -334,3 +334,109 @@ pub fn cables(cfg: &UserConfig) -> Vec<boards::Cable> {
         .map(|o| boards::load_cable_list(&o))
         .unwrap_or_default()
 }
+
+// ------------------------------------------------------------------ Claude
+
+pub use fpgaflow_ai as ai;
+use fpgaflow_ai::{AiEvent, GenFile, Generated};
+
+/// One proposed file, ready for review.
+#[derive(Debug, Clone)]
+pub struct Proposal {
+    pub file: GenFile,
+    /// Absolute destination in the project.
+    pub path: PathBuf,
+    pub existed: bool,
+    /// Unified diff against the current file (or the whole file if new).
+    pub diff: String,
+}
+
+pub fn proposals(project: &Project, g: &Generated) -> Result<Vec<Proposal>> {
+    g.files
+        .iter()
+        .map(|f| {
+            let rel = ai::validate_path(&f.path)?;
+            let path = project.root.join(&rel);
+            let old = std::fs::read_to_string(&path).ok();
+            let existed = old.is_some();
+            let old = old.unwrap_or_default();
+            let td = similar::TextDiff::from_lines(old.as_str(), f.content.as_str());
+            let mut ud = td.unified_diff();
+            let a = if existed {
+                format!("a/{}", f.path)
+            } else {
+                "/dev/null".to_string()
+            };
+            ud.context_radius(3).header(&a, &format!("b/{}", f.path));
+            Ok(Proposal {
+                file: f.clone(),
+                path,
+                existed,
+                diff: ud.to_string(),
+            })
+        })
+        .collect()
+}
+
+/// Write accepted proposals. A new UCF is also added to `[target] constraints`.
+pub fn apply(project: &Project, accepted: &[&Proposal]) -> Result<Vec<PathBuf>> {
+    let mut written = Vec::new();
+    let mut manifest = project.clone();
+    let mut manifest_changed = false;
+    for p in accepted {
+        if let Some(dir) = p.path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::write(&p.path, &p.file.content)
+            .with_context(|| format!("writing {}", p.path.display()))?;
+        written.push(p.path.clone());
+        if p.path.extension().is_some_and(|e| e == "ucf") {
+            let rel = PathBuf::from(&p.file.path);
+            if let Some(t) = manifest.file.target.as_mut() {
+                if !t.constraints.contains(&rel) {
+                    t.constraints.push(rel);
+                    manifest_changed = true;
+                }
+            }
+        }
+    }
+    if manifest_changed {
+        manifest.save()?;
+    }
+    Ok(written)
+}
+
+/// Port list of `module` (or the top), as text for a prompt.
+pub fn ports_text(project: &Project, cfg: &UserConfig, module: Option<&str>) -> Result<String> {
+    let d = analyse(project, cfg, module.map(String::from))?;
+    let m = match module {
+        Some(name) => d
+            .module(name)
+            .with_context(|| format!("module {name} not found"))?,
+        None => d.top().context("no top module")?,
+    };
+    Ok(m.ports
+        .iter()
+        .map(|p| {
+            let dir = format!("{:?}", p.direction).to_lowercase();
+            if p.width > 1 {
+                format!("{dir} [{}:0] {}", p.width - 1, p.name)
+            } else {
+                format!("{dir} {}", p.name)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n"))
+}
+
+/// Ask Claude, check the answer, retry with errors; returns the outcome
+/// (the caller reviews and [`apply`]s it).
+pub async fn ai_generate(
+    project: &Project,
+    cfg: &UserConfig,
+    task: &ai::Task,
+    events: &UnboundedSender<AiEvent>,
+    cancel: &CancellationToken,
+) -> Result<ai::Outcome> {
+    Ok(ai::generate(cfg, project, task, events, cancel).await?)
+}

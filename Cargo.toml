@@ -27,6 +27,7 @@ dirs = "6"
 shell-words = "1"
 wait-timeout = "0.2"
 tempfile = "3"
+similar = "3"
 
 fpgaflow-core = { path = "crates/core" }
 fpgaflow-editor = { path = "crates/editor" }
@@ -37,3 +38,4 @@ fpgaflow-pnr = { path = "crates/pnr" }
 fpgaflow-program = { path = "crates/program" }
 fpgaflow-boards = { path = "crates/boards" }
 fpgaflow-flow = { path = "crates/flow" }
+fpgaflow-ai = { path = "crates/ai" }

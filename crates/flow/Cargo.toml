@@ -19,3 +19,5 @@ fpgaflow-program.workspace = true
 fpgaflow-boards.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+similar.workspace = true
+fpgaflow-ai.workspace = true
