@@ -760,6 +760,23 @@ impl App {
             );
             ui.separator();
             let connected = self.board_connected().is_some();
+            // Say exactly why Program is off: no board in the project, or
+            // its board isn't plugged in (and which known board is).
+            let why_not = match self.project_board() {
+                None => "This project has no board: set [target] board in fpgaflow.toml".to_string(),
+                Some(b) => {
+                    let other = board::boards()
+                        .iter()
+                        .find(|o| o.id != b.id && self.usb.iter().any(|(d, _)| o.matches_usb(d.vid, d.pid)));
+                    match other {
+                        Some(o) => format!(
+                            "This project is for the {}, which is not connected. The {} is connected; open a project for that board to program it.",
+                            b.name, o.name
+                        ),
+                        None => format!("The project's board, the {}, is not connected.", b.name),
+                    }
+                }
+            };
             let prog_status = self.status.get(&Slot::Program).copied();
             let (mark, color) = status_mark(prog_status.unwrap_or(Status::Idle));
             if ui
@@ -767,13 +784,14 @@ impl App {
                     can && connected,
                     egui::Button::new(RichText::new(format!("{mark} Program")).color(color)),
                 )
-                .on_disabled_hover_text("Needs a project board that is connected")
+                .on_disabled_hover_text(if connected { "Busy, or no project open".to_string() } else { why_not.clone() })
                 .clicked()
             {
                 clicked = Some(Action::Program);
             }
             if ui
                 .add_enabled(can && connected, egui::Button::new("Detect"))
+                .on_disabled_hover_text(if connected { "Busy, or no project open".to_string() } else { why_not })
                 .clicked()
             {
                 clicked = Some(Action::Detect);

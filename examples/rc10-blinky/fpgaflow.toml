@@ -1,0 +1,26 @@
+[project]
+name = "rc10-blinky"
+top = "blinky"
+
+[sources]
+rtl = ["rtl/**/*.sv"]
+tb = ["tb/**/*.sv"]
+
+[sim]
+tool = "icarus"        # or "verilator"
+tb_top = "tb_blinky"
+wave = "fst"
+
+# Celoxica RC10 (XC3S1500-4FG320), loaded over its own USB port.
+# LED0 blinks about 1.4 times a second; holding the joystick centre resets.
+[target]
+board = "rc10"
+family = "spartan3"
+device = "xc3s1500"
+package = "fg320"
+speed = "4"
+backend = "ise"
+constraints = ["constraints/rc10.ucf"]
+
+[program]
+mode = "sram"

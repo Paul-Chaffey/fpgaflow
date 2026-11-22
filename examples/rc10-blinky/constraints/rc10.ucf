@@ -1,0 +1,5 @@
+# blinky on the Celoxica RC10 (lines from data/boards/rc10.ucf)
+NET "clk" LOC = "P10" | IOSTANDARD = LVCMOS33 ;     # CLK_48MHZ (bank 4, 3.3 V)
+NET "clk" PERIOD = 20.833ns HIGH 50%;
+NET "rst" LOC = "B10" | IOSTANDARD = LVCMOS33 ;     # JOY_SELECT (bank 1, 3.3 V; external 11k pull-down)
+NET "led" LOC = "D2" | IOSTANDARD = LVCMOS25 | SLEW = SLOW | DRIVE = 8 ;  # LED0 (bank 7, 2.5 V)
