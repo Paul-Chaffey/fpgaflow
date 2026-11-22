@@ -44,6 +44,8 @@ Early development. Working today, from the CLI:
 | `fpgaflow detect` | read-only JTAG scan of the project's board |
 | `fpgaflow program` | load the bitstream into the FPGA (SRAM, volatile) |
 | `fpgaflow boards` | known dev boards |
+| `fpgaflow usb` | scan USB: known boards and openFPGALoader-supported cables |
+| `fpgaflow watch` | live plug/unplug events for boards and cables (udev) |
 | `fpgaflow edit [file] [--line N --col N]` | open in the configured editor (Kate by default) |
 
 Compiler errors from Icarus, Verilator and Yosys are reported as
@@ -142,7 +144,7 @@ mode = "sram"          # or "flash"
    - then VPR (generic arch, F4PGA xc7)
    - then Gowin, Nexus, Mistral and openXC7
    - then the other vendor adapters
-5. Programming *(done for the Spartan-3AN kit)* and live board detection (udev)
+5. Programming *(done for the Spartan-3AN kit)* and live board detection (udev) *(done)*
 6. Claude integration (API and Claude Code CLI)
 7. egui GUI over all of the above, plus packaging
 

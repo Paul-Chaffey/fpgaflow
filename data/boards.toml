@@ -21,6 +21,9 @@ usb = ["03fd:000d", "03fd:0008"]
 # overflowed (LIBUSB_ERROR_OVERFLOW); 750 kHz is reliable. The chain holds
 # the FPGA (index 0) and an XCF04S Platform Flash (index 1). Needs an
 # openFPGALoader with the XC3S700AN part entry (IDCODE 0x02628093).
+# The cable's FX2 is powered from the board (UG334 Table 17-1: 1.8 V LDO2 for
+# the embedded USB programmer), so replugging only USB keeps the firmware
+# loaded and it returns as 03fd:0008; a board power cycle returns 03fd:000d.
 [board.program]
 cable = "xilinxPlatformCableUsb_alt"
 firmware = "ise:xusb_emb.hex"

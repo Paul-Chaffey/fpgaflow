@@ -454,3 +454,76 @@ pub fn boards() -> Result<()> {
     }
     Ok(())
 }
+
+fn cables(cfg: &UserConfig) -> Vec<fpgaflow_boards::Cable> {
+    tools::resolve("openFPGALoader", cfg)
+        .map(|o| fpgaflow_boards::load_cable_list(&o))
+        .unwrap_or_default()
+}
+
+fn describe(d: &fpgaflow_boards::UsbDevice, id: &fpgaflow_boards::Identity) -> String {
+    use fpgaflow_boards::Identity;
+    let what = match id {
+        Identity::Board { name, .. } => format!("BOARD  {name}"),
+        Identity::Cable { names } => format!("CABLE  {}", names.join(" / ")),
+        Identity::Unknown => {
+            let text = [d.manufacturer.as_deref(), d.product.as_deref()]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" ");
+            if text.is_empty() {
+                "(unknown)".to_string()
+            } else {
+                text
+            }
+        }
+    };
+    format!("{}  {what}  [bus {} dev {}]", d.id(), d.bus, d.dev)
+}
+
+pub fn usb(cfg: &UserConfig, all: bool) -> Result<()> {
+    use fpgaflow_boards::Identity;
+    let cables = cables(cfg);
+    let mut shown = 0;
+    for d in fpgaflow_boards::scan()? {
+        let id = fpgaflow_boards::identify(&d, &cables);
+        if all || id != Identity::Unknown {
+            println!("{}", describe(&d, &id));
+            shown += 1;
+        }
+    }
+    if shown == 0 {
+        println!(
+            "no boards or programming cables found ({} cable types known)",
+            cables.len()
+        );
+    }
+    Ok(())
+}
+
+pub fn watch(cfg: &UserConfig) -> Result<()> {
+    use fpgaflow_boards::{Hotplug, Identity};
+    let cables = cables(cfg);
+    let present = fpgaflow_boards::scan()?;
+    for d in &present {
+        let id = fpgaflow_boards::identify(d, &cables);
+        if id != Identity::Unknown {
+            println!("  {}", describe(d, &id));
+        }
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    let _watcher = fpgaflow_boards::watch(&present, tx)?;
+    eprintln!("watching USB (Ctrl-C to stop)");
+    for ev in rx {
+        let (sign, d) = match &ev {
+            Hotplug::Added(d) => ('+', d),
+            Hotplug::Removed(d) => ('-', d),
+        };
+        let id = fpgaflow_boards::identify(d, &cables);
+        if id != Identity::Unknown {
+            println!("{sign} {}", describe(d, &id));
+        }
+    }
+    Ok(())
+}

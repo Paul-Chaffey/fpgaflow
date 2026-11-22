@@ -99,6 +99,14 @@ enum Cmd {
     Detect,
     /// List known dev boards.
     Boards,
+    /// Scan USB for dev boards and programming cables.
+    Usb {
+        /// Show every USB device, not just boards and cables.
+        #[arg(long)]
+        all: bool,
+    },
+    /// Watch for boards and cables being plugged in or removed (Ctrl-C to stop).
+    Watch,
     /// List supported FPGA families and their P&R backends.
     Families,
     /// Elaborate the RTL with Yosys and print the module hierarchy and ports.
@@ -142,6 +150,8 @@ fn main() -> Result<()> {
         Cmd::Program { bit } => flow::program(&cli.dir, &cfg, bit),
         Cmd::Detect => flow::detect(&cli.dir, &cfg),
         Cmd::Boards => flow::boards(),
+        Cmd::Usb { all } => flow::usb(&cfg, all),
+        Cmd::Watch => flow::watch(&cfg),
         Cmd::Build {
             family,
             backend,

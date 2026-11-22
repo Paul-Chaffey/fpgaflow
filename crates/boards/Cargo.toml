@@ -1,0 +1,16 @@
+[package]
+name = "fpgaflow-boards"
+description = "USB board/cable detection and hotplug monitoring for fpgaflow"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+fpgaflow-core.workspace = true
+nix = { workspace = true, features = ["poll"] }
+regex.workspace = true
+serde.workspace = true
+udev = "0.9"
