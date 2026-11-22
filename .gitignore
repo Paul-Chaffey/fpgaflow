@@ -3,3 +3,5 @@
 *.vcd
 *.fst
 *.gtkw.bak
+# Local downloads (e.g. the proprietary ISE installer): never commit
+/Downloads/
