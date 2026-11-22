@@ -189,6 +189,10 @@ pub fn script(r: &ScriptRequest<'_>) -> String {
         s.push_str(c);
         s.push('\n');
     }
+    // flatten leaves $scopeinfo cells recording the old hierarchy; they are
+    // not hardware, and write_edif emits them as references to an undefined
+    // cell, which ISE's ngdbuild rejects (NgdBuild:175).
+    s.push_str("delete t:$scopeinfo\n");
     s.push_str(&format!("tee -q -o {} stat -json\n", q(&r.stat)));
     s.push_str(&writer(r.netlist_format, &r.netlist));
     s.push('\n');
@@ -297,6 +301,7 @@ mod tests {
                 r#"read_verilog -sv "/p/rtl/a.sv""#,
                 "hierarchy -check -top top",
                 "synth_xilinx -family xc3sa -ise -top top -flatten",
+                "delete t:$scopeinfo",
                 r#"tee -q -o "/p/build/synth/stat.json" stat -json"#,
                 r#"write_edif -pvector bra "/p/build/synth/top.out""#,
             ]

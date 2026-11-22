@@ -160,6 +160,9 @@ pub fn parse_line(line: &str) -> Option<Diagnostic> {
         let severity = match &c[4] {
             "warning" => Severity::Warning,
             "note" => Severity::Note,
+            // Icarus "sorry" means unsupported, except this one, which only
+            // widens an always_* block's sensitivity and simulates correctly.
+            "sorry" if c[5].contains("will be sensitive to all bits") => Severity::Warning,
             _ => Severity::Error, // error, sorry (= unsupported)
         };
         return Some(Diagnostic {
@@ -288,6 +291,10 @@ mod tests {
         let n = d("rtl/a.sv:3:      : The port is declared here.");
         assert_eq!(n.severity, Severity::Note);
         assert_eq!(n.message, "The port is declared here.");
+        let wide = d("rtl/s.sv:94: sorry: constant selects in always_* processes are not fully supported (the process will be sensitive to all bits in 'ph[31:0]').");
+        assert_eq!(wide.severity, Severity::Warning);
+        let unsup = d("rtl/s.sv:9: sorry: Unsupported dynamic array method.");
+        assert_eq!(unsup.severity, Severity::Error);
     }
 
     #[test]
