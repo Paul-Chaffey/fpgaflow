@@ -6,8 +6,9 @@
 // Frere Jacques) with melody, bass and drums on the stereo audio outputs.
 // The eight LEDs are a level meter and the 7-segment displays show patterns.
 //
-// Joystick: left/right = previous/next tune, up/down = display mode
-// (snake, note name, VU columns, sparkle), centre = pause/play.
+// Joystick: left/right = volume down/up (0..8, shown as "u0".."u8"),
+// up/down = next/previous tune ("t1".."t3"), centre = next display mode
+// (snake, note name, VU columns, sparkle).
 module music_top #(
     parameter int unsigned EIGHTH     = 11_250_000, // clocks per eighth note: 128 BPM at 48 MHz
     parameter int unsigned TICK_DIV   = 48_000,     // 1 kHz control tick
@@ -37,20 +38,24 @@ module music_top #(
     logic [4:0] press;
     buttons u_btn (.clk(clk), .rst(rst), .tick(tick_ms), .raw(joy), .press(press));
 
+    // press = {select, down, up, right, left}
+    localparam logic [3:0] VOL_MAX = 4'd8, VOL_START = 4'd6;
     logic [1:0] tune, mode;
-    logic       run;
-    wire        tune_change = press[0] | press[1];
+    logic [3:0] volume;
+    wire        run = 1'b1;   // always playing (no pause control)
+    wire        tune_change   = press[2] | press[3];
+    wire        volume_change = press[0] | press[1];
     always_ff @(posedge clk) begin
         if (rst) begin
-            tune <= 2'd0;
-            mode <= 2'd0;
-            run  <= 1'b1;
+            tune   <= 2'd0;
+            mode   <= 2'd0;
+            volume <= VOL_START;
         end else begin
-            if (press[1]) tune <= (tune == 2'd2) ? 2'd0 : tune + 2'd1;
-            else if (press[0]) tune <= (tune == 2'd0) ? 2'd2 : tune - 2'd1;
-            if (press[2]) mode <= mode + 2'd1;
-            else if (press[3]) mode <= mode - 2'd1;
-            if (press[4]) run <= !run;
+            if (press[2]) tune <= (tune == 2'd2) ? 2'd0 : tune + 2'd1;        // up: next
+            else if (press[3]) tune <= (tune == 2'd0) ? 2'd2 : tune - 2'd1;   // down: previous
+            if (press[1] && volume != VOL_MAX) volume <= volume + 4'd1;       // right: louder
+            else if (press[0] && volume != 4'd0) volume <= volume - 4'd1;     // left: quieter
+            if (press[4]) mode <= mode + 2'd1;                                // centre: next mode
         end
     end
 
@@ -68,6 +73,7 @@ module music_top #(
     synth u_synth (
         .clk(clk), .rst(rst), .run(run), .tick_ms(tick_ms), .tick_smp(tick_smp),
         .note_on(note_on), .eighth(eighth), .pos(pos), .mel(mel), .bass(bass),
+        .volume(volume),
         .sample_l(sample_l), .sample_r(sample_r), .level(level),
         .mel_env(mel_env), .kick_env(kick_env)
     );
@@ -82,6 +88,7 @@ module music_top #(
     segments u_seg (
         .clk(clk), .rst(rst), .tick_ms(tick_ms), .eighth(eighth), .pos(pos),
         .mode(mode), .run(run), .tune(tune), .tune_change(tune_change),
+        .volume(volume), .volume_change(volume_change),
         .mel(mel), .mel_env(mel_env), .kick_env(kick_env), .seg0(seg0), .seg1(seg1)
     );
 

@@ -1,0 +1,34 @@
+[dumpfile] "/home/paul/Projects/FPGA/examples/rc10-music/build/sim/verilator/tb_music.fst"
+[timestart] 0
+@28
+tb_music.clk
+@22
+tb_music.joy[4:0]
+@22
+tb_music.led[7:0]
+@22
+tb_music.seg0[7:0]
+@22
+tb_music.seg1[7:0]
+@28
+tb_music.audio_l
+@28
+tb_music.audio_r
+@22
+tb_music.piezo[1:0]
+@22
+tb_music.tn[5:0]
+@22
+tb_music.tinc[31:0]
+@22
+tb_music.m[5:0]
+@28
+tb_music.prev
+@22
+tb_music.seen[7:0]
+@22
+tb_music.p0[31:0]
+@22
+tb_music.p1[31:0]
+@22
+tb_music.inc[31:0]

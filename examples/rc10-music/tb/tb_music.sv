@@ -6,7 +6,8 @@
 // clocks, a "millisecond" 40 clocks and an audio sample 50 clocks. Checks the
 // note sequence and timing, the pitch table against the equal-temperament
 // formula (computed here independently), the oscillator, the audio and LED
-// meter, the joystick controls, the 7-segment note names, and pause.
+// meter, the joystick controls (volume, tune, display mode) and the
+// 7-segment note names and overlays.
 module tb_music;
     localparam int EIGHTH = 3000;
     localparam int TICK   = 40;
@@ -134,15 +135,15 @@ module tb_music;
         check(toggles > 1000, $sformatf("audio_l toggled only %0d times", toggles));
         check(seen[3], $sformatf("LED meter only reached %b", seen));
 
-        // 5. Right: next tune (Twinkle) from the top, with "t2" shown.
-        press(RIGHT);
-        check(dut.tune == 2'd1, "right selects tune 1");
+        // 5. Up: next tune (Twinkle) from the top, with "t2" shown.
+        press(UP);
+        check(dut.tune == 2'd1, "up selects tune 1");
         check(dut.u_seq.idx == 6'd0 && dut.u_seq.mel == 6'd36, "tune 1 starts on C5");
         check(seg0 == 8'h78 && seg1 == 8'h5b, $sformatf("overlay shows %h %h, expected t2", seg0, seg1));
 
-        // 6. Up: note-name mode; after the overlay, the display names the note.
-        press(UP);
-        check(dut.mode == 2'd1, "up selects display mode 1");
+        // 6. Centre: note-name mode; after the overlay, the display names the note.
+        press(SELECT);
+        check(dut.mode == 2'd1, "centre selects display mode 1");
         while (dut.u_seg.overlay_ms != 10'd0) @(posedge clk);
         repeat (2) begin
             next_note(m, w);
@@ -151,42 +152,47 @@ module tb_music;
                   $sformatf("note %0d shown as %h %h", m, seg0, seg1));
         end
 
-        // 7. Select: pause. No notes, "PA", silence (50 % duty), meter falls.
-        press(SELECT);
-        check(dut.run == 1'b0, "select pauses");
-        check(seg0 == 8'h73 && seg1 == 8'h77, $sformatf("paused display %h %h, expected PA", seg0, seg1));
-        w = 0;
-        repeat (5 * EIGHTH) begin
-            @(posedge clk);
-            if (dut.u_seq.note_on) w++;
-        end
-        check(w == 0, "no notes while paused");
+        // 7. Left: quieter, shown as "u5"; the meter follows the volume.
+        check(dut.volume == 4'd6, "volume starts at 6");
+        press(LEFT);
+        check(dut.volume == 4'd5, "left lowers the volume");
+        check(seg0 == 8'h1c && seg1 == digit(5), $sformatf("volume overlay %h %h, expected u5", seg0, seg1));
+        // Down to 0 (and not below): silence (50 % duty), meter falls to 0.
+        repeat (6) press(LEFT);
+        check(dut.volume == 4'd0, "volume stops at 0");
+        repeat (4 * SMP) @(posedge clk);
         ones = 0;
+        w = 0;
         repeat (20000) begin
             @(posedge clk);
             if (audio_l) ones++;
+            if (dut.u_seq.note_on) w++;
         end
-        check(ones >= 9998 && ones <= 10002, $sformatf("paused audio duty %0d/20000, expected half", ones));
+        check(ones >= 9998 && ones <= 10002, $sformatf("volume 0 audio duty %0d/20000, expected half", ones));
+        check(w > 0, "the tune keeps playing at volume 0");
         repeat (1000 * TICK) @(posedge clk);
-        check(led == 8'h00, $sformatf("meter still %b after a second of silence", led));
+        check(led == 8'h00, $sformatf("meter still %b at volume 0", led));
 
-        // 8. Select again: playing resumes.
-        press(SELECT);
-        check(dut.run == 1'b1, "select resumes");
-        next_note(m, w);
-        check(w <= 2 * EIGHTH, "notes resume");
+        // 8. Right: louder again (and not above 8); sound and meter return.
+        repeat (10) press(RIGHT);
+        check(dut.volume == 4'd8, "volume stops at 8");
+        seen = 8'h00;
+        repeat (4 * EIGHTH) begin
+            @(posedge clk);
+            seen |= led;
+        end
+        check(seen[3], $sformatf("meter only reached %b at full volume", seen));
 
-        // 9. Left twice: tune 1 -> 0 -> 2 (wraps), Frere Jacques starts on C5.
-        press(LEFT);
-        check(dut.tune == 2'd0, "left selects tune 0");
-        press(LEFT);
-        check(dut.tune == 2'd2, "left wraps to tune 2");
+        // 9. Down twice: tune 1 -> 0 -> 2 (wraps), Frere Jacques starts on C5.
+        press(DOWN);
+        check(dut.tune == 2'd0, "down selects tune 0");
+        press(DOWN);
+        check(dut.tune == 2'd2, "down wraps to tune 2");
         check(dut.u_seq.mel == 6'd36, "tune 2 starts on C5");
 
-        // 10. Down twice from mode 1: 0, then wraps to 3 (sparkle).
-        press(DOWN);
-        press(DOWN);
-        check(dut.mode == 2'd3, "down wraps the display mode");
+        // 10. Centre three times from mode 1: 2, 3, then wraps to 0 (snake).
+        repeat (3) press(SELECT);
+        check(dut.mode == 2'd0, "centre wraps the display mode");
 
         check(piezo == 2'b00, "piezo held low");
         if (errors == 0) $display("PASS: tb_music");

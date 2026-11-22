@@ -13,6 +13,8 @@ module segments (
     input  logic       run,
     input  logic [1:0] tune,
     input  logic       tune_change,
+    input  logic [3:0] volume,
+    input  logic       volume_change,
     input  logic [5:0] mel,
     input  logic [7:0] mel_env,
     input  logic [7:0] kick_env,
@@ -77,7 +79,8 @@ module segments (
     logic [2:0]  step;
     logic [14:0] lfsr;
     logic [13:0] sparkle;
-    logic [9:0]  overlay_ms;     // time left showing "tN" after a tune change
+    logic [9:0]  overlay_ms;     // time left showing "tN" or "uN" after a change
+    logic        overlay_vol;    // the overlay shows the volume, not the tune
 
     always_ff @(posedge clk) begin
         if (rst) begin
@@ -85,14 +88,19 @@ module segments (
             lfsr       <= 15'h1;
             sparkle    <= 14'd0;
             overlay_ms <= 10'd0;
+            overlay_vol <= 1'b0;
         end else begin
             if (eighth && run) begin
                 step    <= step + 3'd1;
                 lfsr    <= {lfsr[13:0], lfsr[14] ^ lfsr[13]};
                 sparkle <= {lfsr[13:7], lfsr[6:0]};
             end
-            if (tune_change) overlay_ms <= 10'd1000;
-            else if (tick_ms && overlay_ms != 10'd0) overlay_ms <= overlay_ms - 10'd1;
+            if (tune_change || volume_change) begin
+                overlay_ms  <= 10'd1000;
+                overlay_vol <= volume_change;
+            end else if (tick_ms && overlay_ms != 10'd0) begin
+                overlay_ms <= overlay_ms - 10'd1;
+            end
         end
     end
 
@@ -120,7 +128,8 @@ module segments (
             2'd2: pat = {column(kick_env), column(mel_env)};
             default: pat = {1'b0, sparkle[13:7], 1'b0, sparkle[6:0]};
         endcase
-        if (overlay_ms != 10'd0) pat = {8'h78, digit({2'b00, tune} + 4'd1)};  // "t1".."t3"
+        if (overlay_ms != 10'd0 && overlay_vol) pat = {S_C | S_D | S_E, digit(volume)}; // "u0".."u8"
+        else if (overlay_ms != 10'd0) pat = {8'h78, digit({2'b00, tune} + 4'd1)};   // "t1".."t3"
         else if (!run) pat = {8'h73, 8'h77};                                 // "PA"
     end
 

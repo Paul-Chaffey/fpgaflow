@@ -18,6 +18,7 @@ module synth (
     input  logic [2:0] pos,
     input  logic [5:0] mel,       // 63 = rest
     input  logic [5:0] bass,      // 63 = rest
+    input  logic [3:0] volume,    // 0 (mute) .. 8 (full)
     output logic [9:0] sample_l,
     output logic [9:0] sample_r,
     output logic [9:0] level,     // |mix|, for the meter
@@ -107,11 +108,18 @@ module synth (
         m_hat   = noise_w * $signed({1'b0, hat_e[15:8]});
     end
 
-    // Stage 1: scaled voices. Stage 2: the mix. Stage 3: clamp and level.
+    // Stage 1: scaled voices. Stage 2: the mix. Stage 3: volume.
+    // Stage 4: clamp and level (so the LED meter follows the volume).
     // (Samples change at 48 kHz, so the pipeline costs nothing.)
     logic signed [8:0] r_mel, r_bass, r_kick, r_snare, r_hat;
-    logic smp_d, smp_d2;
-    logic signed [11:0] sum_l, sum_r, mix_l, mix_r;
+    logic smp_d, smp_d2, smp_d3;
+    logic signed [11:0] sum_l, sum_r, raw_l, raw_r, mix_l, mix_r;
+    // Volume: mix * volume / 8 (|mix| <= 576, so 17 bits signed is plenty).
+    logic signed [16:0] vol_l, vol_r;
+    always_comb begin
+        vol_l = raw_l * $signed({1'b0, volume});
+        vol_r = raw_r * $signed({1'b0, volume});
+    end
     logic signed [12:0] off_l, off_r;
     // Explicit sign extension (no reliance on context-sized signed arithmetic).
     function automatic logic signed [11:0] sx(input logic signed [8:0] v);
@@ -139,7 +147,10 @@ module synth (
     always_ff @(posedge clk) begin
         smp_d  <= tick_smp;
         smp_d2 <= smp_d;
+        smp_d3 <= smp_d2;
         if (rst) begin
+            raw_l <= 12'sd0;
+            raw_r <= 12'sd0;
             mix_l <= 12'sd0;
             mix_r <= 12'sd0;
             r_mel <= 9'sd0; r_bass <= 9'sd0; r_kick <= 9'sd0; r_snare <= 9'sd0; r_hat <= 9'sd0;
@@ -155,10 +166,14 @@ module synth (
                 r_hat   <= 9'(m_hat >>> 8);
             end
             if (smp_d) begin
-                mix_l <= sum_l;
-                mix_r <= sum_r;
+                raw_l <= sum_l;
+                raw_r <= sum_r;
             end
             if (smp_d2) begin
+                mix_l <= 12'(vol_l >>> 3);
+                mix_r <= 12'(vol_r >>> 3);
+            end
+            if (smp_d3) begin
                 if (run) begin
                     sample_l <= clamp10(off_l);
                     sample_r <= clamp10(off_r);
