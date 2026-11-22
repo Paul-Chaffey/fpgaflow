@@ -364,6 +364,8 @@ pub struct LayoutData {
     pub paths: Vec<ise::TimingPath>,
     /// The `.xdl` the placement was read from.
     pub xdl: Option<PathBuf>,
+    /// Floorplan regions from `constraints/floorplan.ucf`.
+    pub regions: Vec<fpgaflow_layout::floorplan::Region>,
 }
 
 /// Where device and package data are cached, one set per part.
@@ -467,6 +469,9 @@ pub async fn layout(project: &Project, cfg: &UserConfig, ctx: &Ctx) -> Result<La
     let paths = std::fs::read_to_string(&twr)
         .map(|t| ise::parse_timing_paths(&t))
         .unwrap_or_default();
+    let regions = std::fs::read_to_string(project.root.join(fpgaflow_layout::floorplan::FILE))
+        .map(|t| fpgaflow_layout::floorplan::parse(&t))
+        .unwrap_or_default();
     Ok(LayoutData {
         part,
         device,
@@ -474,7 +479,25 @@ pub async fn layout(project: &Project, cfg: &UserConfig, ctx: &Ctx) -> Result<La
         placed,
         paths,
         xdl: xdl_used,
+        regions,
     })
+}
+
+/// Write the floorplan file for `regions` and make sure the project lists
+/// it in `[target] constraints`. Takes effect at the next build.
+pub fn save_floorplan(
+    project: &Project,
+    device: &Device,
+    regions: &[fpgaflow_layout::floorplan::Region],
+) -> Result<PathBuf> {
+    use fpgaflow_layout::floorplan;
+    let path = project.root.join(floorplan::FILE);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(&path, floorplan::render(regions, device))?;
+    add_constraint_file(project, floorplan::FILE)?;
+    Ok(path)
 }
 
 /// What the pin planner works with.

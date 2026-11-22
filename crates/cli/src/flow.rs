@@ -440,6 +440,63 @@ pub fn layout(
     Ok(())
 }
 
+/// `floorplan` (list), `floorplan set M RANGE`, `floorplan remove M`.
+pub fn floorplan(dir: &Path, cfg: &UserConfig, change: Option<(&str, Option<&str>)>) -> Result<()> {
+    use fpgaflow_flow::layout_model::floorplan::{containment, Region};
+    let project = Project::find(dir)?;
+    let l = run(|ctx| {
+        let project = &project;
+        async move { fpgaflow_flow::layout(project, cfg, &ctx).await }
+    })?;
+    let mut regions = l.regions.clone();
+    if let Some((module, range)) = change {
+        regions.retain(|r| r.module != module);
+        if let Some(range) = range {
+            let re = regex::Regex::new(r"^SLICE_X(\d+)Y(\d+):SLICE_X(\d+)Y(\d+)$").unwrap();
+            let c = re.captures(range.trim()).with_context(|| {
+                format!("range must look like SLICE_X0Y0:SLICE_X23Y31, not {range:?}")
+            })?;
+            let n = |i: usize| c[i].parse::<u32>().unwrap_or(0);
+            let (sx, sy) = l.device.slice_extent();
+            let r = Region::new(module, (n(1), n(2)), (n(3), n(4)));
+            if r.x1 >= sx || r.y1 >= sy {
+                bail!(
+                    "{range} is outside the device (slices X0..{}, Y0..{})",
+                    sx - 1,
+                    sy - 1
+                );
+            }
+            regions.push(r);
+        }
+        let f = fpgaflow_flow::save_floorplan(&project, &l.device, &regions)?;
+        println!("wrote {} (rebuild to apply)", rel(&project, &f).display());
+    }
+    if regions.is_empty() {
+        println!("no floorplan regions");
+        return Ok(());
+    }
+    let stats = l.placed.as_ref().map(|p| containment(&regions, p));
+    for (k, r) in regions.iter().enumerate() {
+        print!(
+            "  {:<12} {}  ({} slices)",
+            r.module,
+            r.slice_range(),
+            r.slices()
+        );
+        if change.is_none() {
+            if let Some(c) = stats.as_ref().map(|s| &s[k]) {
+                let total = c.inside + c.outside.len();
+                print!("  last build: {}/{total} inside", c.inside);
+                for (i, site) in c.outside.iter().take(5) {
+                    print!("\n      outside: {} at {site}", short(i, 60));
+                }
+            }
+        }
+        println!();
+    }
+    Ok(())
+}
+
 fn load_pins(dir: &Path, cfg: &UserConfig) -> Result<(Project, fpgaflow_flow::PinData)> {
     let project = Project::find(dir)?;
     let d = run(|ctx| {

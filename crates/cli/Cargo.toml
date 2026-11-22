@@ -13,6 +13,7 @@ name = "fpgaflow"
 path = "src/main.rs"
 
 [dependencies]
+regex.workspace = true
 fpgaflow-core.workspace = true
 fpgaflow-editor.workspace = true
 anyhow.workspace = true

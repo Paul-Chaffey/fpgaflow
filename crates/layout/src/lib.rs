@@ -9,6 +9,7 @@
 //! [`fpgaflow_pnr::ise::parse_timing_paths`].
 
 pub mod device;
+pub mod floorplan;
 pub mod package;
 pub mod pins;
 pub mod placed;

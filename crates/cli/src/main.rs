@@ -117,6 +117,12 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<PinsCmd>,
     },
+    /// Floorplanner: list regions (and how the last build kept to them), or
+    /// confine a top-level module to a rectangle of slices (ISE targets).
+    Floorplan {
+        #[command(subcommand)]
+        cmd: Option<FloorplanCmd>,
+    },
     /// List known dev boards.
     Boards,
     /// Scan USB for dev boards and programming cables.
@@ -144,6 +150,15 @@ enum Cmd {
         #[arg(long)]
         top: Option<String>,
     },
+}
+
+#[derive(Subcommand)]
+enum FloorplanCmd {
+    /// Confine MODULE (a top-level instance, e.g. u_synth) to slices
+    /// RANGE, e.g. `SLICE_X0Y0:SLICE_X23Y31`. Rebuild to apply.
+    Set { module: String, range: String },
+    /// Remove MODULE's region.
+    Remove { module: String },
 }
 
 #[derive(Subcommand)]
@@ -187,6 +202,15 @@ fn main() -> Result<()> {
         Cmd::Families => flow::families(),
         Cmd::Program { bit } => flow::program(&cli.dir, &cfg, bit),
         Cmd::Detect => flow::detect(&cli.dir, &cfg),
+        Cmd::Floorplan { cmd } => match cmd {
+            None => flow::floorplan(&cli.dir, &cfg, None),
+            Some(FloorplanCmd::Set { module, range }) => {
+                flow::floorplan(&cli.dir, &cfg, Some((&module, Some(&range))))
+            }
+            Some(FloorplanCmd::Remove { module }) => {
+                flow::floorplan(&cli.dir, &cfg, Some((&module, None)))
+            }
+        },
         Cmd::Pins { cmd } => match cmd {
             None => flow::pins(&cli.dir, &cfg),
             Some(PinsCmd::Set { port, pin }) => flow::pins_set(&cli.dir, &cfg, &port, Some(&pin)),

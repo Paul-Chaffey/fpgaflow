@@ -1459,6 +1459,7 @@ dependencies = [
  "fpgaflow-program",
  "fpgaflow-sim",
  "fpgaflow-synth",
+ "regex",
  "serde",
  "serde_json",
  "tokio",
