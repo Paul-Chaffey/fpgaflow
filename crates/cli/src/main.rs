@@ -98,6 +98,19 @@ enum Cmd {
     },
     /// Read-only JTAG scan of the project's board: lists the devices in the chain.
     Detect,
+    /// Where the last build put things: the device, per-module use, the worst
+    /// timing paths site by site, and an instance or net on request (ISE).
+    Layout {
+        /// How many of the worst timing paths to show.
+        #[arg(long, default_value_t = 3)]
+        paths: usize,
+        /// Show one placed instance (exact name).
+        #[arg(long)]
+        inst: Option<String>,
+        /// Show one net's pins and routing tiles (exact name).
+        #[arg(long)]
+        net: Option<String>,
+    },
     /// List known dev boards.
     Boards,
     /// Scan USB for dev boards and programming cables.
@@ -159,6 +172,9 @@ fn main() -> Result<()> {
         Cmd::Families => flow::families(),
         Cmd::Program { bit } => flow::program(&cli.dir, &cfg, bit),
         Cmd::Detect => flow::detect(&cli.dir, &cfg),
+        Cmd::Layout { paths, inst, net } => {
+            flow::layout(&cli.dir, &cfg, paths, inst.as_deref(), net.as_deref())
+        }
         Cmd::Boards => flow::boards(),
         Cmd::Usb { all } => flow::usb(&cfg, all),
         Cmd::Watch => flow::watch(&cfg),

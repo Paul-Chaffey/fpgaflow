@@ -284,6 +284,59 @@ pub fn plan_bitstream(ip: &IsePlan, mode: ProgramMode, extra: &[String]) -> Plan
     }
 }
 
+// ------------------------------------------------------------ layout data
+
+fn one_job_plan(stage: &str, workdir: &Path, job: JobSpec, outputs: Vec<PathBuf>) -> Plan {
+    Plan {
+        stage: stage.into(),
+        workdir: workdir.to_path_buf(),
+        jobs: vec![job.timeout(std::time::Duration::from_secs(600))],
+        outputs,
+        verdict_job: None,
+        files: vec![],
+    }
+}
+
+/// Plan `xdl -report <devpkg> <out>`: every tile and site of the device
+/// (`devpkg` is device + package, e.g. `xc3s1500fg320`).
+pub fn plan_device_report(cfg: &UserConfig, devpkg: &str, out: &Path) -> Result<Plan, PnrError> {
+    let settings = settings_script(cfg)?;
+    let dir = out.parent().unwrap_or(Path::new("."));
+    let out_s = out.to_string_lossy().into_owned();
+    let j = job(
+        &settings,
+        "ise:xdl-report",
+        dir,
+        "xdl",
+        &["-report", devpkg, &out_s],
+    );
+    Ok(one_job_plan("device", dir, j, vec![out.to_path_buf()]))
+}
+
+/// Plan `partgen -v <devpkg>` in `dir`, which writes `<devpkg>.pkg` there.
+pub fn plan_package(cfg: &UserConfig, devpkg: &str, dir: &Path) -> Result<Plan, PnrError> {
+    let settings = settings_script(cfg)?;
+    let j = job(&settings, "ise:partgen", dir, "partgen", &["-v", devpkg]);
+    Ok(one_job_plan(
+        "package",
+        dir,
+        j,
+        vec![dir.join(format!("{devpkg}.pkg"))],
+    ))
+}
+
+/// Plan `xdl -ncd2xdl <ncd> <xdl>`: the placed and routed design as text.
+pub fn plan_xdl(cfg: &UserConfig, ncd: &Path, xdl: &Path) -> Result<Plan, PnrError> {
+    let settings = settings_script(cfg)?;
+    let dir = xdl.parent().unwrap_or(Path::new("."));
+    let (n, x) = (
+        ncd.to_string_lossy().into_owned(),
+        xdl.to_string_lossy().into_owned(),
+    );
+    let j = job(&settings, "ise:xdl", dir, "xdl", &["-ncd2xdl", &n, &x]);
+    Ok(one_job_plan("xdl", dir, j, vec![xdl.to_path_buf()]))
+}
+
 // ------------------------------------------------------------------ reports
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -298,6 +351,121 @@ static MRP_ROW: LazyLock<Regex> =
 
 fn n(s: &str) -> u64 {
     s.replace(',', "").parse().unwrap_or(0)
+}
+
+/// One step of a timing path: a delay at a site pin.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PathStep {
+    /// Site, e.g. `SLICE_X13Y62`, or a pad's ball, e.g. `P10`.
+    pub site: String,
+    /// Site pin, e.g. `YQ`, `G2`, `COUT`.
+    pub pin: String,
+    /// `Tcko`, `Tilo`, ... for logic; `net` for routing.
+    pub kind: String,
+    pub delay_ns: f64,
+    /// Logical resources (signal and cell names) at this step.
+    pub logical: Vec<String>,
+}
+
+impl PathStep {
+    pub fn is_net(&self) -> bool {
+        self.kind == "net"
+    }
+}
+
+/// A detailed path from a `trce -v` report.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TimingPath {
+    pub slack_ns: f64,
+    pub source: String,
+    pub dest: String,
+    pub delay_ns: Option<f64>,
+    pub levels: Option<u32>,
+    pub steps: Vec<PathStep>,
+}
+
+static TWR_SLACK: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^Slack:\s+(-?[\d.]+)ns").unwrap());
+static TWR_ENDPOINT: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s+(Source|Destination):\s+(.+?)(?:\s+\([A-Z]+\))?\s*$").unwrap()
+});
+static TWR_DELAY: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s+Data Path Delay:\s+([\d.]+)ns\s+\(Levels of Logic = (\d+)\)").unwrap()
+});
+static TWR_STEP: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s{4}(\S+)\.(\S+)\s+(net \(fanout=\d+\)|T\w+)\s+(-?[\d.]+)\s*(\S.*)?$").unwrap()
+});
+static TWR_MORE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s{40,}(\S.*)$").unwrap());
+
+/// The detailed data paths of a timing report, worst slack first. Paths
+/// without steps (pulse-width checks) and duplicates are dropped.
+pub fn parse_timing_paths(text: &str) -> Vec<TimingPath> {
+    let mut paths: Vec<TimingPath> = Vec::new();
+    let mut cur: Option<TimingPath> = None;
+    let mut in_steps = false;
+    let flush = |cur: &mut Option<TimingPath>, paths: &mut Vec<TimingPath>| {
+        if let Some(p) = cur.take() {
+            let dup = paths
+                .iter()
+                .any(|q| q.source == p.source && q.dest == p.dest && q.slack_ns == p.slack_ns);
+            if !p.steps.is_empty() && !dup {
+                paths.push(p);
+            }
+        }
+    };
+    for line in text.lines() {
+        if let Some(c) = TWR_SLACK.captures(line) {
+            flush(&mut cur, &mut paths);
+            in_steps = false;
+            cur = Some(TimingPath {
+                slack_ns: c[1].parse().unwrap_or(0.0),
+                source: String::new(),
+                dest: String::new(),
+                delay_ns: None,
+                levels: None,
+                steps: Vec::new(),
+            });
+            continue;
+        }
+        let Some(p) = cur.as_mut() else { continue };
+        if line.contains("Maximum Data Path:") {
+            in_steps = true;
+        } else if line.trim_start().starts_with("Total ") {
+            in_steps = false;
+        } else if in_steps {
+            if let Some(c) = TWR_STEP.captures(line) {
+                let kind = if c[3].starts_with("net") {
+                    "net"
+                } else {
+                    &c[3]
+                };
+                p.steps.push(PathStep {
+                    site: c[1].to_string(),
+                    pin: c[2].to_string(),
+                    kind: kind.to_string(),
+                    delay_ns: c[4].parse().unwrap_or(0.0),
+                    logical: c
+                        .get(5)
+                        .map(|m| vec![m.as_str().trim().to_string()])
+                        .unwrap_or_default(),
+                });
+            } else if let (Some(c), Some(s)) = (TWR_MORE.captures(line), p.steps.last_mut()) {
+                s.logical.push(c[1].trim().to_string());
+            }
+        } else if let Some(c) = TWR_ENDPOINT.captures(line) {
+            if &c[1] == "Source" {
+                p.source = c[2].to_string();
+            } else {
+                p.dest = c[2].to_string();
+            }
+        } else if let Some(c) = TWR_DELAY.captures(line) {
+            p.delay_ns = c[1].parse().ok();
+            p.levels = c[2].parse().ok();
+        }
+    }
+    flush(&mut cur, &mut paths);
+    paths.sort_by(|a, b| a.slack_ns.total_cmp(&b.slack_ns));
+    paths
 }
 
 /// Top-level resource lines of a map report (`*_map.mrp`).
@@ -494,6 +662,36 @@ mod tests {
         assert!(!rc10.contains(&"StartupClk:JtagClk".to_string()));
         assert!(rc10.contains(&"StartupClk:Cclk".to_string()));
         assert!(rc10.contains(&"DONE_cycle:6".to_string()));
+    }
+
+    #[test]
+    fn detailed_timing_paths() {
+        let twr = include_str!("../../layout/tests/fixtures/music-excerpt.twr");
+        let paths = parse_timing_paths(twr);
+        assert_eq!(paths.len(), 2, "pulse-width checks have no steps");
+        let p = &paths[0];
+        assert_eq!(p.slack_ns, 3.258);
+        assert_eq!(p.source, "$auto$ff.cc:337:slice$6182");
+        assert_eq!(p.dest, "$auto$ff.cc:337:slice$6262");
+        assert_eq!((p.delay_ns, p.levels), (Some(17.566), Some(12)));
+        let s0 = &p.steps[0];
+        assert_eq!(
+            (s0.site.as_str(), s0.pin.as_str(), s0.kind.as_str()),
+            ("SLICE_X13Y62", "YQ", "Tcko")
+        );
+        assert_eq!(s0.delay_ns, 0.720);
+        assert_eq!(
+            s0.logical,
+            ["u_synth.mix_l[8]", "$auto$ff.cc:337:slice$6182"]
+        );
+        let s1 = &p.steps[1];
+        assert!(s1.is_net() && s1.site == "SLICE_X11Y62" && s1.pin == "G2");
+        let total: f64 = p.steps.iter().map(|s| s.delay_ns).sum();
+        assert!(
+            (total - 17.566).abs() < 0.01,
+            "steps add up to the path delay: {total}"
+        );
+        assert!(paths[1].slack_ns >= p.slack_ns);
     }
 
     #[test]

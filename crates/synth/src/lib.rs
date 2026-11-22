@@ -189,6 +189,10 @@ pub fn script(r: &ScriptRequest<'_>) -> String {
         s.push_str(c);
         s.push('\n');
     }
+    // Name the anonymous $abc$/$auto$ cells after the signals they drive, so
+    // timing reports, the device view and AREA_GROUP patterns (`u_x.*`) can
+    // tell which module a cell came from.
+    s.push_str("autoname\n");
     // flatten leaves $scopeinfo cells recording the old hierarchy; they are
     // not hardware, and write_edif emits them as references to an undefined
     // cell, which ISE's ngdbuild rejects (NgdBuild:175).
@@ -301,6 +305,7 @@ mod tests {
                 r#"read_verilog -sv "/p/rtl/a.sv""#,
                 "hierarchy -check -top top",
                 "synth_xilinx -family xc3sa -ise -top top -flatten",
+                "autoname",
                 "delete t:$scopeinfo",
                 r#"tee -q -o "/p/build/synth/stat.json" stat -json"#,
                 r#"write_edif -pvector bra "/p/build/synth/top.out""#,

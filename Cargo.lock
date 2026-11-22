@@ -1499,10 +1499,12 @@ name = "fpgaflow-flow"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "dirs",
  "fpgaflow-ai",
  "fpgaflow-boards",
  "fpgaflow-core",
  "fpgaflow-hdl",
+ "fpgaflow-layout",
  "fpgaflow-pnr",
  "fpgaflow-program",
  "fpgaflow-sim",
@@ -1538,6 +1540,14 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "fpgaflow-layout"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "tempfile",
 ]
 
 [[package]]

@@ -347,6 +347,121 @@ pub fn cables(cfg: &UserConfig) -> Vec<boards::Cable> {
         .unwrap_or_default()
 }
 
+// ------------------------------------------------------------------ layout
+
+pub use fpgaflow_layout as layout_model;
+use fpgaflow_layout::{Device, Package, Placed};
+
+/// Everything the layout tools draw, for one project.
+pub struct LayoutData {
+    /// Full part, e.g. `xc3s1500-4-fg320`.
+    pub part: String,
+    pub device: Device,
+    pub package: Package,
+    /// The last build's placement and routing, if there has been a build.
+    pub placed: Option<Placed>,
+    /// Detailed timing paths from the last build, worst first.
+    pub paths: Vec<ise::TimingPath>,
+    /// The `.xdl` the placement was read from.
+    pub xdl: Option<PathBuf>,
+}
+
+/// Where device and package data are cached, one set per part.
+pub fn device_cache_dir() -> PathBuf {
+    dirs::cache_dir()
+        .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".cache"))
+        .join("fpgaflow")
+        .join("devices")
+}
+
+fn newer(a: &Path, b: &Path) -> bool {
+    let m = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    match (m(a), m(b)) {
+        (Some(a), Some(b)) => a > b,
+        (Some(_), None) => true,
+        _ => false,
+    }
+}
+
+/// Load (generating with ISE where needed) the device, package and the last
+/// build's placement for the project's target. ISE designs only for now.
+pub async fn layout(project: &Project, cfg: &UserConfig, ctx: &Ctx) -> Result<LayoutData> {
+    let t = project
+        .file
+        .target
+        .as_ref()
+        .context("fpgaflow.toml has no [target]")?;
+    let backend = t.backend.as_deref().unwrap_or("");
+    if backend != "ise" {
+        anyhow::bail!(
+            "the layout tools support the ISE backend only so far (target backend: {backend:?})"
+        );
+    }
+    let part = fpgaflow_pnr::part_name(t)?;
+    let devpkg = format!(
+        "{}{}",
+        t.device.as_deref().unwrap_or_default(),
+        t.package.as_deref().unwrap_or_default()
+    );
+    let dir = device_cache_dir();
+    std::fs::create_dir_all(&dir)?;
+
+    let xdlrc = dir.join(format!("{devpkg}.xdlrc"));
+    if !xdlrc.is_file() {
+        ctx.note(format!(
+            "reading the {devpkg} device from ISE (once per part)"
+        ));
+        let s = ctx
+            .run(&ise::plan_device_report(cfg, &devpkg, &xdlrc)?)
+            .await?;
+        if !s.ok || !xdlrc.is_file() {
+            anyhow::bail!("xdl -report {devpkg} failed");
+        }
+    }
+    let pkg = dir.join(format!("{devpkg}.pkg"));
+    if !pkg.is_file() {
+        // partgen also writes partlist files; keep them out of the cache.
+        let tmp = dir.join(format!("partgen-{devpkg}"));
+        std::fs::create_dir_all(&tmp)?;
+        let s = ctx.run(&ise::plan_package(cfg, &devpkg, &tmp)?).await?;
+        let made = tmp.join(format!("{devpkg}.pkg"));
+        if !s.ok || !made.is_file() {
+            anyhow::bail!("partgen -v {devpkg} failed");
+        }
+        std::fs::rename(&made, &pkg)?;
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+    let device = Device::parse(&std::fs::read_to_string(&xdlrc)?);
+    let package = Package::parse(&std::fs::read_to_string(&pkg)?);
+
+    let bit = fpgaflow_program::default_bitstream(project);
+    let ncd = bit.with_extension("ncd");
+    let twr = bit.with_extension("twr");
+    let (mut placed, mut xdl_used) = (None, None);
+    if ncd.is_file() {
+        let xdl = bit.with_extension("xdl");
+        if !xdl.is_file() || newer(&ncd, &xdl) {
+            let s = ctx.run(&ise::plan_xdl(cfg, &ncd, &xdl)?).await?;
+            if !s.ok {
+                anyhow::bail!("xdl -ncd2xdl failed");
+            }
+        }
+        placed = Some(Placed::parse(&std::fs::read_to_string(&xdl)?));
+        xdl_used = Some(xdl);
+    }
+    let paths = std::fs::read_to_string(&twr)
+        .map(|t| ise::parse_timing_paths(&t))
+        .unwrap_or_default();
+    Ok(LayoutData {
+        part,
+        device,
+        package,
+        placed,
+        paths,
+        xdl: xdl_used,
+    })
+}
+
 // ------------------------------------------------------------------ Claude
 
 pub use fpgaflow_ai as ai;

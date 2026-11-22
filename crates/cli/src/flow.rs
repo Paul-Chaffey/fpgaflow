@@ -3,7 +3,7 @@
 use std::future::Future;
 use std::path::Path;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use fpgaflow_core::job::JobEvent;
 use fpgaflow_core::project::{Project, SimTool};
 use fpgaflow_core::stage::{Summary, Verdict};
@@ -333,6 +333,122 @@ pub fn detect(dir: &Path, cfg: &UserConfig) -> Result<()> {
         bail!("JTAG scan failed");
     }
     Ok(())
+}
+
+pub fn layout(
+    dir: &Path,
+    cfg: &UserConfig,
+    npaths: usize,
+    inst: Option<&str>,
+    net: Option<&str>,
+) -> Result<()> {
+    let project = Project::find(dir)?;
+    let l = run(|ctx| {
+        let project = &project;
+        async move { fpgaflow_flow::layout(project, cfg, &ctx).await }
+    })?;
+    let d = &l.device;
+    let (sx, sy) = d.slice_extent();
+    println!(
+        "{}: {} x {} tiles; {} slices ({sx} x {sy}), {} bonded pads, {} RAMB16, {} MULT18X18, {} DCM",
+        l.part,
+        d.rows,
+        d.cols,
+        d.count("SLICE"),
+        d.bonded_pads(),
+        d.count("RAMB16"),
+        d.count("MULT18X18"),
+        d.count("DCM")
+    );
+    let Some(p) = &l.placed else {
+        println!("no placed design yet: run `fpgaflow build`");
+        return Ok(());
+    };
+    let by = p.by_module();
+    let slices: u32 = by.values().map(|m| m.slices).sum();
+    println!(
+        "\nplaced {} ({} instances, {} nets) from {}",
+        p.design,
+        p.insts.len(),
+        p.nets.len(),
+        l.xdl
+            .as_deref()
+            .map(|x| rel(&project, x).display().to_string())
+            .unwrap_or_default()
+    );
+    println!(
+        "  {:<14} {:>7} {:>6} {:>6} {:>6}",
+        "module", "slices", "pads", "mult", "bram"
+    );
+    for (m, u) in &by {
+        println!(
+            "  {m:<14} {:>7} {:>6} {:>6} {:>6}",
+            u.slices, u.pads, u.mults, u.brams
+        );
+    }
+    println!("  {:<14} {slices:>7}", "total");
+
+    for (i, path) in l.paths.iter().take(npaths).enumerate() {
+        println!(
+            "\npath {}: slack {:.3} ns, {} levels, {} -> {}",
+            i + 1,
+            path.slack_ns,
+            path.levels
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "?".into()),
+            path.source,
+            path.dest
+        );
+        for s in &path.steps {
+            println!(
+                "    {:<22} {:<8} {:>6.3}  {}",
+                format!("{}.{}", s.site, s.pin),
+                s.kind,
+                s.delay_ns,
+                short(s.logical.first().map(String::as_str).unwrap_or(""), 70)
+            );
+        }
+    }
+    if let Some(name) = inst {
+        let i = p
+            .inst(name)
+            .with_context(|| format!("no placed instance {name:?}"))?;
+        println!(
+            "\n{}: {} at {} (tile {}), module {}",
+            i.name, i.kind, i.site, i.tile, i.module
+        );
+    }
+    if let Some(name) = net {
+        let n = p.net(name).with_context(|| format!("no net {name:?}"))?;
+        println!(
+            "\nnet {}: {} pins, {} PIPs in {} tiles",
+            n.name,
+            n.pins.len(),
+            n.pip_count(),
+            n.pip_tiles.len()
+        );
+        for pin in &n.pins {
+            let site = p.inst(&pin.inst).map(|i| i.site.as_str()).unwrap_or("?");
+            println!(
+                "    {} {}.{} at {site}",
+                if pin.output { "out" } else { "in " },
+                pin.inst,
+                pin.pin
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Long Yosys-derived names shortened in the middle for one-line output.
+fn short(s: &str, max: usize) -> String {
+    let n = s.chars().count();
+    if n <= max {
+        return s.to_string();
+    }
+    let head: String = s.chars().take(max / 2).collect();
+    let tail: String = s.chars().skip(n - (max / 2 - 1)).collect();
+    format!("{head}…{tail}")
 }
 
 pub fn boards() -> Result<()> {

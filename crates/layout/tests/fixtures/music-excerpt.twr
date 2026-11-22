@@ -1,0 +1,129 @@
+Slack:                  3.258ns (requirement - (data path - clock path skew + uncertainty))
+  Source:               $auto$ff.cc:337:slice$6182 (FF)
+  Destination:          $auto$ff.cc:337:slice$6262 (FF)
+  Requirement:          20.833ns
+  Data Path Delay:      17.566ns (Levels of Logic = 12)
+  Clock Path Skew:      -0.009ns (0.990 - 0.999)
+  Source Clock:         u_btn.clk rising at 0.000ns
+  Destination Clock:    u_btn.clk rising at 20.833ns
+  Clock Uncertainty:    0.000ns
+
+  Maximum Data Path: $auto$ff.cc:337:slice$6182 to $auto$ff.cc:337:slice$6262
+    Location             Delay type         Delay(ns)  Physical Resource
+                                                       Logical Resource(s)
+    -------------------------------------------------  -------------------
+    SLICE_X13Y62.YQ      Tcko                  0.720   u_synth.mix_l[8]
+                                                       $auto$ff.cc:337:slice$6182
+    SLICE_X11Y62.G2      net (fanout=4)        0.588   u_synth.mix_l[9]
+    SLICE_X11Y62.Y       Tilo                  0.551   $abc$57268$aiger$o2869
+                                                       $abc$57268$lut$not$aiger57267$510
+    SLICE_X8Y62.G2       net (fanout=2)        0.612   $abc$57268$aiger$o2869
+    SLICE_X8Y62.COUT     Topcyg                1.096   $techmap57708$abc$57268$lut$aiger$o3072.A[1]
+                                                       $abc$57268$aiger$o2869_rt.1
+                                                       $auto$alumacc.cc:578:replace_alu$4123.genblk1.slice[9].muxcy
+    SLICE_X8Y63.CIN      net (fanout=1)        0.000   $abc$57268$aiger$o2892
+    SLICE_X8Y63.Y        Tciny                 0.923   $abc$57268$lut$aiger$o3073.A[2]
+                                                       $auto$alumacc.cc:578:replace_alu$4123.genblk1.slice[10].muxcy
+                                                       $auto$alumacc.cc:578:replace_alu$4123.genblk1.slice[11].xorcy
+    SLICE_X9Y63.F2       net (fanout=2)        0.209   $abc$57268$lut$aiger$o3073.A[1]
+    SLICE_X9Y63.X        Tif5x                 0.911   $techmap57695$abc$57268$lut$aiger57267$4349.A[3]
+                                                       $abc$57268$lut$aiger$o3073.genblk1.genblk1.genblk1.genblk1.genblk1.genblk1.genblk1.lut1
+                                                       $abc$57268$lut$aiger$o3073.genblk1.genblk1.genblk1.genblk1.genblk1.genblk1.genblk1.mux5
+    SLICE_X9Y62.G1       net (fanout=2)        0.352   $techmap57695$abc$57268$lut$aiger57267$4349.A[3]
+    SLICE_X9Y62.Y        Tilo                  0.551   $abc$57268$aiger$o3072
+                                                       $abc$57268$lut$aiger57267$4349
+    SLICE_X9Y62.F3       net (fanout=1)        0.015   $techmap57708$abc$57268$lut$aiger$o3072.A[3]
+    SLICE_X9Y62.X        Tilo                  0.551   $abc$57268$aiger$o3072
+                                                       $abc$57268$lut$aiger$o3072
+    SLICE_X7Y62.F2       net (fanout=1)        0.600   $abc$57268$aiger$o3072
+    SLICE_X7Y62.XB       Topxb                 1.002   $techmap2899$flattenu_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv:136$gt$354.Y
+                                                       $abc$57268$aiger$o3072_rt
+                                                       $flatten\u_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv:136$gt$354.genblk1.slice[2].muxcy
+    SLICE_X9Y60.F1       net (fanout=10)       1.429   $techmap2899$flattenu_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv:136$gt$354.Y
+    SLICE_X9Y60.X        Tilo                  0.551   $techmap57730$abc$57268$lut$aiger$o1372.A[2]
+                                                       $abc$57268$lut$aiger57267$2784
+    SLICE_X2Y64.G2       net (fanout=3)        1.739   $techmap57730$abc$57268$lut$aiger$o1372.A[2]
+    SLICE_X2Y64.Y        Tilo                  0.608   $abc$57268$aiger$o3053
+                                                       $auto$abc_ops_reintegrate.cc:722:reintegrate$57354
+    SLICE_X4Y65.BX       net (fanout=1)        0.725   $abc$57268$aiger$o3053
+    SLICE_X4Y65.COUT     Tbxcy                 0.906   $abc$57268$aiger$o3048
+                                                       $flatten\u_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv:165$gt$371.genblk1.slice[2].muxcy
+                                                       $flatten\u_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv:165$gt$371.genblk1.slice[3].muxcy
+    SLICE_X4Y66.CIN      net (fanout=1)        0.000   $abc$57268$aiger$o3048
+    SLICE_X4Y66.XB       Tcinxb                0.440   $abc$57268$aiger$o3047
+                                                       $flatten\u_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv:165$gt$371.genblk1.slice[4].muxcy
+    SLICE_X3Y64.F1       net (fanout=10)       1.854   $techmap2896$flattenu_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv:165$gt$371.Y
+    SLICE_X3Y64.CLK      Tfck                  0.633   level[4]
+                                                       $abc$57268$lut$aiger$o1372
+                                                       $auto$ff.cc:337:slice$6262
+    -------------------------------------------------  ---------------------------
+    Total                                     17.566ns (9.443ns logic, 8.123ns route)
+                                                       (53.8% logic, 46.2% route)
+
+--------------------------------------------------------------------------------
+
+Slack:                  3.311ns (requirement - (data path - clock path skew + uncertainty))
+  Source:               $auto$ff.cc:337:slice$6182 (FF)
+  Destination:          $auto$ff.cc:337:slice$6262 (FF)
+  Requirement:          20.833ns
+  Data Path Delay:      17.513ns (Levels of Logic = 12)
+  Clock Path Skew:      -0.009ns (0.990 - 0.999)
+  Source Clock:         u_btn.clk rising at 0.000ns
+  Destination Clock:    u_btn.clk rising at 20.833ns
+  Clock Uncertainty:    0.000ns
+
+  Maximum Data Path: $auto$ff.cc:337:slice$6182 to $auto$ff.cc:337:slice$6262
+    Location             Delay type         Delay(ns)  Physical Resource
+                                                       Logical Resource(s)
+    -------------------------------------------------  -------------------
+    SLICE_X13Y62.YQ      Tcko                  0.720   u_synth.mix_l[8]
+                                                       $auto$ff.cc:337:slice$6182
+    SLICE_X11Y62.G2      net (fanout=4)        0.588   u_synth.mix_l[9]
+    SLICE_X11Y62.Y       Tilo                  0.551   $abc$57268$aiger$o2869
+                                                       $abc$57268$lut$not$aiger57267$510
+    SLICE_X8Y62.G2       net (fanout=2)        0.612   $abc$57268$aiger$o2869
+    SLICE_X8Y62.COUT     Topcyg                1.096   $techmap57708$abc$57268$lut$aiger$o3072.A[1]
+                                                       $abc$57268$aiger$o2869_rt.1
+                                                       $auto$alumacc.cc:578:replace_alu$4123.genblk1.slice[9].muxcy
+    SLICE_X8Y63.CIN      net (fanout=1)        0.000   $abc$57268$aiger$o2892
+    SLICE_X8Y63.Y        Tciny                 0.923   $abc$57268$lut$aiger$o3073.A[2]
+                                                       $auto$alumacc.cc:578:replace_alu$4123.genblk1.slice[10].muxcy
+                                                       $auto$alumacc.cc:578:replace_alu$4123.genblk1.slice[11].xorcy
+    SLICE_X9Y63.G2       net (fanout=2)        0.156   $abc$57268$lut$aiger$o3073.A[1]
+    SLICE_X9Y63.X        Tif5x                 0.911   $techmap57695$abc$57268$lut$aiger57267$4349.A[3]
+                                                       $abc$57268$lut$aiger$o3073.genblk1.genblk1.genblk1.genblk1.genblk1.genblk1.genblk1.lut0
+                                                       $abc$57268$lut$aiger$o3073.genblk1.genblk1.genblk1.genblk1.genblk1.genblk1.genblk1.mux5
+    SLICE_X9Y62.G1       net (fanout=2)        0.352   $techmap57695$abc$57268$lut$aiger57267$4349.A[3]
+    SLICE_X9Y62.Y        Tilo                  0.551   $abc$57268$aiger$o3072
+                                                       $abc$57268$lut$aiger57267$4349
+    SLICE_X9Y62.F3       net (fanout=1)        0.015   $techmap57708$abc$57268$lut$aiger$o3072.A[3]
+    SLICE_X9Y62.X        Tilo                  0.551   $abc$57268$aiger$o3072
+                                                       $abc$57268$lut$aiger$o3072
+    SLICE_X7Y62.F2       net (fanout=1)        0.600   $abc$57268$aiger$o3072
+    SLICE_X7Y62.XB       Topxb                 1.002   $techmap2899$flattenu_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv:136$gt$354.Y
+                                                       $abc$57268$aiger$o3072_rt
+                                                       $flatten\u_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv:136$gt$354.genblk1.slice[2].muxcy
+    SLICE_X9Y60.F1       net (fanout=10)       1.429   $techmap2899$flattenu_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv:136$gt$354.Y
+    SLICE_X9Y60.X        Tilo                  0.551   $techmap57730$abc$57268$lut$aiger$o1372.A[2]
+                                                       $abc$57268$lut$aiger57267$2784
+    SLICE_X2Y64.G2       net (fanout=3)        1.739   $techmap57730$abc$57268$lut$aiger$o1372.A[2]
+    SLICE_X2Y64.Y        Tilo                  0.608   $abc$57268$aiger$o3053
+                                                       $auto$abc_ops_reintegrate.cc:722:reintegrate$57354
+    SLICE_X4Y65.BX       net (fanout=1)        0.725   $abc$57268$aiger$o3053
+    SLICE_X4Y65.COUT     Tbxcy                 0.906   $abc$57268$aiger$o3048
+                                                       $flatten\u_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv:165$gt$371.genblk1.slice[2].muxcy
+                                                       $flatten\u_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv:165$gt$371.genblk1.slice[3].muxcy
+    SLICE_X4Y66.CIN      net (fanout=1)        0.000   $abc$57268$aiger$o3048
+    SLICE_X4Y66.XB       Tcinxb                0.440   $abc$57268$aiger$o3047
+                                                       $flatten\u_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv:165$gt$371.genblk1.slice[4].muxcy
+    SLICE_X3Y64.F1       net (fanout=10)       1.854   $techmap2896$flattenu_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv:165$gt$371.Y
+    SLICE_X3Y64.CLK      Tfck                  0.633   level[4]
+                                                       $abc$57268$lut$aiger$o1372
+                                                       $auto$ff.cc:337:slice$6262
+    -------------------------------------------------  ---------------------------
+    Total                                     17.513ns (9.443ns logic, 8.070ns route)
+                                                       (53.9% logic, 46.1% route)
+
+--------------------------------------------------------------------------------
+
+Slack: 19.261ns (period - (min low pulse limit / (low pulse / period)))

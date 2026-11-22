@@ -1,0 +1,25 @@
+package xc3s1500fg320
+# PartGen P.20131013
+# Trace-length data does not apply to this package type or is not yet available. Values will be listed as N.A.
+#  	pad                 pin           vref vcco function                        nearest   diff.  tracelength
+#  	name                name          bank bank  name                            CLB      pair      (um)
+pin	PAD1                B3              0   0   IO/VREF_0                       X1Y127    N.A.      N.A.
+pin	PAD2                A2              0   0   IO_L01N_0/VRP_0                 X1Y127    99S       N.A.
+pin	PAD3                A3              0   0   IO_L01P_0/VRN_0                 X1Y127    99M       N.A.
+pin	PAD17               B4              0   0   IO_L09N_0                       X13Y127   98S       N.A.
+pin	PAD18               C4              0   0   IO_L09P_0                       X13Y127   98M       N.A.
+pin	PAD19               C5              0   0   IO_L10N_0                       X15Y127   97S       N.A.
+pin	PAD20               D5              0   0   IO_L10P_0                       X15Y127   97M       N.A.
+pin	PAD47               B5              0   0   IO_L25N_0                       X37Y127   95S       N.A.
+pin	PAD294              U13             4   4   IO/VREF_4                       X74Y0     N.A.      N.A.
+pin	PAD310              T12             4   4   IO_L27N_4/DIN/D0                X62Y0     44S       N.A.
+pin	PAD323              P10             4   4   IO_L32P_4/GCLK0                 X52Y0     39M       N.A.
+pin	PAD494              D2              7   7   IO_L17P_7                       X0Y104    2M        N.A.
+pkgpin	CCLK                T15             -1  -1  CCLK                            N.A.      N.A.      N.A.
+pkgpin	PROG_B              E5              -1  -1  PROG_B                          N.A.      N.A.      N.A.
+pkgpin	TDI                 D4              -1  -1  TDI                             N.A.      N.A.      N.A.
+pkgpin	VCCO_4              T13             -1  4   VCCO_4                          N.A.      N.A.      N.A.
+pkgpin	VCCO_4              M10             -1  4   VCCO_4                          N.A.      N.A.      N.A.
+pkgpin	VCCO_4              M11             -1  4   VCCO_4                          N.A.      N.A.      N.A.
+pkgpin	VCCO_4              U11             -1  4   VCCO_4                          N.A.      N.A.      N.A.
+pkgpin	GND                 F18             -1  -1  GND                             N.A.      N.A.      N.A.

@@ -70,6 +70,9 @@ pub struct Board {
     /// Pins `fpgaflow build` refuses to let a design use.
     #[serde(default)]
     pub reserved: Vec<ReservedPins>,
+    /// I/O bank supply (VCCO) in volts, by bank number, where known.
+    #[serde(default)]
+    pub banks: std::collections::BTreeMap<String, f32>,
 }
 
 /// Master constraint files shipped in `data/`, compiled in so a new
@@ -94,6 +97,23 @@ impl Board {
     /// File name for the board's UCF inside a project (`constraints/<id>.ucf`).
     pub fn ucf_file_name(&self) -> String {
         format!("{}.ucf", self.id)
+    }
+
+    /// VCCO of an I/O bank in volts, if the profile says.
+    pub fn bank_voltage(&self, bank: u32) -> Option<f32> {
+        self.banks.get(&bank.to_string()).copied()
+    }
+
+    /// The LVCMOS standard matching a bank's VCCO, if known.
+    pub fn bank_standard(&self, bank: u32) -> Option<&'static str> {
+        match self.bank_voltage(bank)? {
+            v if (v - 3.3).abs() < 0.05 => Some("LVCMOS33"),
+            v if (v - 2.5).abs() < 0.05 => Some("LVCMOS25"),
+            v if (v - 1.8).abs() < 0.05 => Some("LVCMOS18"),
+            v if (v - 1.5).abs() < 0.05 => Some("LVCMOS15"),
+            v if (v - 1.2).abs() < 0.05 => Some("LVCMOS12"),
+            _ => None,
+        }
     }
 
     /// Why `pin` must not be used on this board, if it is reserved.
@@ -201,6 +221,9 @@ mod tests {
         let ucf = b.ucf_text().unwrap();
         assert!(ucf.contains(r#"NET "CLK_48MHZ" LOC = "P10""#));
         assert_eq!(b.reserved_pins().count(), 14);
+        assert_eq!(b.bank_standard(0), Some("LVCMOS12"));
+        assert_eq!(b.bank_standard(7), Some("LVCMOS25"));
+        assert_eq!(b.bank_standard(4), Some("LVCMOS33"));
         assert!(b.reserved_reason("a8").is_some());
         assert!(b.reserved_reason("D2").is_none());
         assert!(ucf.contains(r#"NET "LED<0>" LOC = "D2""#));

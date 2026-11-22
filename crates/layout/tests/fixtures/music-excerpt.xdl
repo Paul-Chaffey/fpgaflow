@@ -1,0 +1,162 @@
+
+# =======================================================
+# XDL NCD CONVERSION MODE $Revision: 1.01$
+# time: Sun Nov 22 20:32:55 2026
+
+# =======================================================
+
+
+# =======================================================
+# The syntax for the design statement is:                
+# design <design_name> <part> <ncd version>;             
+# or                                                     
+# design <design_name> <device> <package> <speed> <ncd_version>
+# =======================================================
+design "music_top" xc3s1500fg320-4 v3.2 ,
+  cfg "
+       _DESIGN_PROP::BUS_INFO:2:OUTPUT:piezo[1:0]
+       _DESIGN_PROP::BUS_INFO:5:INPUT:joy[4:0]
+       _DESIGN_PROP::BUS_INFO:8:OUTPUT:led[7:0]
+       _DESIGN_PROP::BUS_INFO:8:OUTPUT:seg0[7:0]
+       _DESIGN_PROP::BUS_INFO:8:OUTPUT:seg1[7:0]
+       _DESIGN_PROP::PIN_INFO:joy(0):/music_top/PACKED/music_top/joy[0]/joy[0]/PAD:INPUT:4:joy[4\:0]
+       _DESIGN_PROP::PIN_INFO:joy(1):/music_top/PACKED/music_top/joy[1]/joy[1]/PAD:INPUT:3:joy[4\:0]
+       _DESIGN_PROP::PIN_INFO:joy(2):/music_top/PACKED/music_top/joy[2]/joy[2]/PAD:INPUT:2:joy[4\:0]
+       _DESIGN_PROP::PIN_INFO:joy(3):/music_top/PACKED/music_top/joy[3]/joy[3]/PAD:INPUT:1:joy[4\:0]
+       _DESIGN_PROP::PIN_INFO:joy(4):/music_top/PACKED/music_top/joy[4]/joy[4]/PAD:INPUT:0:joy[4\:0]
+       _DESIGN_PROP::PIN_INFO:led(0):/music_top/PACKED/music_top/led[0]/led[0]/PAD:OUTPUT:7:led[7\:0]
+       _DESIGN_PROP::PIN_INFO:led(1):/music_top/PACKED/music_top/led[1]/led[1]/PAD:OUTPUT:6:led[7\:0]
+       _DESIGN_PROP::PIN_INFO:led(2):/music_top/PACKED/music_top/led[2]/led[2]/PAD:OUTPUT:5:led[7\:0]
+       _DESIGN_PROP::PIN_INFO:led(3):/music_top/PACKED/music_top/led[3]/led[3]/PAD:OUTPUT:4:led[7\:0]
+       _DESIGN_PROP::PIN_INFO:led(4):/music_top/PACKED/music_top/led[4]/led[4]/PAD:OUTPUT:3:led[7\:0]
+       _DESIGN_PROP::PIN_INFO:led(5):/music_top/PACKED/music_top/led[5]/led[5]/PAD:OUTPUT:2:led[7\:0]
+       _DESIGN_PROP::PIN_INFO:led(6):/music_top/PACKED/music_top/led[6]/led[6]/PAD:OUTPUT:1:led[7\:0]
+       _DESIGN_PROP::PIN_INFO:led(7):/music_top/PACKED/music_top/led[7]/led[7]/PAD:OUTPUT:0:led[7\:0]
+       _DESIGN_PROP::PIN_INFO:piezo(0):/music_top/PACKED/music_top/piezo[0]/piezo[0]/PAD:OUTPUT:1:piezo[1\:0]
+       _DESIGN_PROP::PIN_INFO:piezo(1):/music_top/PACKED/music_top/piezo[1]/piezo[1]/PAD:OUTPUT:0:piezo[1\:0]
+       _DESIGN_PROP::PIN_INFO:seg0(0):/music_top/PACKED/music_top/seg0[0]/seg0[0]/PAD:OUTPUT:7:seg0[7\:0]
+       _DESIGN_PROP::PIN_INFO:seg0(1):/music_top/PACKED/music_top/seg0[1]/seg0[1]/PAD:OUTPUT:6:seg0[7\:0]
+       _DESIGN_PROP::PIN_INFO:seg0(2):/music_top/PACKED/music_top/seg0[2]/seg0[2]/PAD:OUTPUT:5:seg0[7\:0]
+       _DESIGN_PROP::PIN_INFO:seg0(3):/music_top/PACKED/music_top/seg0[3]/seg0[3]/PAD:OUTPUT:4:seg0[7\:0]
+       _DESIGN_PROP::PIN_INFO:seg0(4):/music_top/PACKED/music_top/seg0[4]/seg0[4]/PAD:OUTPUT:3:seg0[7\:0]
+       _DESIGN_PROP::PIN_INFO:seg0(5):/music_top/PACKED/music_top/seg0[5]/seg0[5]/PAD:OUTPUT:2:seg0[7\:0]
+       _DESIGN_PROP::PIN_INFO:seg0(6):/music_top/PACKED/music_top/seg0[6]/seg0[6]/PAD:OUTPUT:1:seg0[7\:0]
+       _DESIGN_PROP::PIN_INFO:seg0(7):/music_top/PACKED/music_top/seg0[7]/seg0[7]/PAD:OUTPUT:0:seg0[7\:0]
+       _DESIGN_PROP::PIN_INFO:seg1(0):/music_top/PACKED/music_top/seg1[0]/seg1[0]/PAD:OUTPUT:7:seg1[7\:0]
+       _DESIGN_PROP::PIN_INFO:seg1(1):/music_top/PACKED/music_top/seg1[1]/seg1[1]/PAD:OUTPUT:6:seg1[7\:0]
+       _DESIGN_PROP::PIN_INFO:seg1(2):/music_top/PACKED/music_top/seg1[2]/seg1[2]/PAD:OUTPUT:5:seg1[7\:0]
+       _DESIGN_PROP::PIN_INFO:seg1(3):/music_top/PACKED/music_top/seg1[3]/seg1[3]/PAD:OUTPUT:4:seg1[7\:0]
+       _DESIGN_PROP::PIN_INFO:seg1(4):/music_top/PACKED/music_top/seg1[4]/seg1[4]/PAD:OUTPUT:3:seg1[7\:0]
+       _DESIGN_PROP::PIN_INFO:seg1(5):/music_top/PACKED/music_top/seg1[5]/seg1[5]/PAD:OUTPUT:2:seg1[7\:0]
+       _DESIGN_PROP::PIN_INFO:seg1(6):/music_top/PACKED/music_top/seg1[6]/seg1[6]/PAD:OUTPUT:1:seg1[7\:0]
+       _DESIGN_PROP::PIN_INFO:seg1(7):/music_top/PACKED/music_top/seg1[7]/seg1[7]/PAD:OUTPUT:0:seg1[7\:0]
+       _DESIGN_PROP::PK_NGMTIMESTAMP:1795375255";
+
+inst "u_synth.mel_e[9]" "SLICEL",placed R18C3 SLICE_X4Y92  ,
+  cfg " BXINV::#OFF BYINV::#OFF CEINV::CE CLKINV::CLK COUTUSED::#OFF CY0F::#OFF
+       CY0G::#OFF CYINIT::#OFF CYSELF::#OFF CYSELG::#OFF DXMUX::1 DYMUX::1
+       F:$auto$abc_ops_reintegrate.cc\:722\:reintegrate$57456:#LUT:D=(A3+(A1*A2))
+       F5USED::#OFF FFX:$auto$ff.cc\:337\:slice$6613:#FF FFX_INIT_ATTR::INIT0
+       FFX_SR_ATTR::SRLOW FFY:$auto$ff.cc\:337\:slice$6612:#FF FFY_INIT_ATTR::INIT0
+       FFY_SR_ATTR::SRLOW FXMUX::F FXUSED::#OFF G:$auto$abc_ops_reintegrate.cc\:722\:reintegrate$57457:#LUT:D=(A3+(A1*A2))
+       GYMUX::G REVUSED::#OFF SRINV::SR SYNC_ATTR::SYNC XBUSED::#OFF XUSED::#OFF
+       YBUSED::#OFF YUSED::#OFF "
+  ;
+
+inst "$flatten\u_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv:104$mul$233" "MULT18X18",placed BMR24C1 MULT18X18_X0Y10  ,
+  cfg " CEINV::#OFF CLKINV::#OFF RSTINV::#OFF BLACKBOX:$flatten\\u_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv\:104$mul$233:
+       "
+  ;
+
+inst "clk" "IOB",placed BIOIC27 P10  ,
+  cfg " DRIVEATTRBOX::#OFF DRIVE_0MA::#OFF GTSATTRBOX::#OFF ICEINV::#OFF
+       ICLK1INV::#OFF ICLK2INV::#OFF IDELMUX::1 IFF1::#OFF IFF1_INIT_ATTR::#OFF
+       IFF1_SR_ATTR::#OFF IFF2::#OFF IFF2_INIT_ATTR::#OFF IFF2_SR_ATTR::#OFF
+       IFFATTRBOX::#OFF IFFDELMUX::#OFF IFFDMUX::#OFF IMUX::1 IOATTRBOX::LVCMOS33
+       IREV_USED::#OFF ISR_USED::#OFF O1INV::#OFF O2INV::#OFF OCEINV::#OFF
+       OFF1::#OFF OFF1_INIT_ATTR::#OFF OFF1_SR_ATTR::#OFF OFF2::#OFF OFF2_INIT_ATTR::#OFF
+       OFF2_SR_ATTR::#OFF OFFATTRBOX::#OFF OMUX::#OFF OREV_USED::#OFF OSR_USED::#OFF
+       OTCLK1INV::#OFF OTCLK2INV::#OFF PULL::#OFF REVINV::#OFF SLEW::#OFF
+       SRINV::#OFF T1INV::#OFF T2INV::#OFF TCEINV::#OFF TFF1::#OFF TFF1_INIT_ATTR::#OFF
+       TFF1_SR_ATTR::#OFF TFF2::#OFF TFF2_INIT_ATTR::#OFF TFF2_SR_ATTR::#OFF
+       TFFATTRBOX::#OFF TMUX::#OFF TREV_USED::#OFF TSMUX::#OFF TSR_USED::#OFF
+       T_USED::#OFF INBUF:$iopadmap$music_top.clk: PAD:clk: "
+  ;
+
+inst "$abc$57268$aiger$o2869" "SLICEL",placed R33C6 SLICE_X11Y62  ,
+  cfg " BXINV::BX BYINV::#OFF CEINV::#OFF CLKINV::#OFF COUTUSED::#OFF CY0F::F1
+       CY0G::#OFF CYINIT::BX CYSELF::F CYSELG::#OFF DXMUX::#OFF DYMUX::#OFF
+       F:$abc$57268$lut$aiger$o3078:#LUT:D=(~A1*(~A2*(~A4*~A3))) F5USED::#OFF
+       FFX::#OFF FFX_INIT_ATTR::#OFF FFX_SR_ATTR::#OFF FFY::#OFF FFY_INIT_ATTR::#OFF
+       FFY_SR_ATTR::#OFF FXMUX::#OFF FXUSED::#OFF G:$abc$57268$lut$not$aiger57267$510:#LUT:D=~A2
+       GYMUX::G REVUSED::#OFF SRINV::#OFF SYNC_ATTR::#OFF XBUSED::0 XUSED::#OFF
+       YBUSED::#OFF YUSED::0 CYMUXF:$flatten\\u_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv\:135$lt$351.genblk1.slice[2].muxcy:
+       _INST_PROP::XDL_SHAPE_DESC:Shape_12:CARRY,A\ carry\ chain\ starting\ with\ carry\ mux\ \"$flatten\\u_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv\:135$lt$351.genblk1.slice[2].muxcy\"
+       _INST_PROP::XDL_SHAPE_MEMBER:Shape_12:0,0 "
+  ;
+
+net "$abc$57268$aiger$o100" , 
+  outpin "$abc$57268$aiger$o99" Y ,
+  inpin "$flatten\u_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv:105$mul$234" A10 ,
+  inpin "$flatten\u_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv:105$mul$234" A11 ,
+  inpin "$flatten\u_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv:105$mul$234" A12 ,
+  inpin "$flatten\u_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv:105$mul$234" A13 ,
+  inpin "$flatten\u_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv:105$mul$234" A14 ,
+  inpin "$flatten\u_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv:105$mul$234" A15 ,
+  inpin "$flatten\u_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv:105$mul$234" A16 ,
+  inpin "$flatten\u_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv:105$mul$234" A17 ,
+  inpin "$flatten\u_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv:105$mul$234" A7 ,
+  inpin "$flatten\u_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv:105$mul$234" A8 ,
+  inpin "$flatten\u_synth.$/home/paul/Projects/FPGA/examples/rc10-music/rtl/synth.sv:105$mul$234" A9 ,
+  pip BMR28C1 BRAMSITE_D_B1_19 -> BRAMSITE_M2_B7 , 
+  pip BMR28C1 BRAMSITE_D_B2_16 -> BRAMSITE_M2_B8 , 
+  pip BMR28C1 BRAMSITE_D_B2_17 -> BRAMSITE_M2_B9 , 
+  pip BMR28C1 BRAMSITE_D_B2_18 -> BRAMSITE_M2_B10 , 
+  pip BMR28C1 BRAMSITE_D_B2_19 -> BRAMSITE_M2_B11 , 
+  pip BMR28C1 BRAMSITE_D_B3_16 -> BRAMSITE_M2_B12 , 
+  pip BMR28C1 BRAMSITE_D_B3_17 -> BRAMSITE_M2_B13 , 
+  pip BMR28C1 BRAMSITE_D_B3_18 -> BRAMSITE_M2_B14 , 
+  pip BMR28C1 BRAMSITE_D_B3_19 -> BRAMSITE_M2_B15 , 
+  pip BMR28C1 BRAMSITE_D_B3_20 -> BRAMSITE_M2_B16 , 
+  pip BMR28C1 BRAMSITE_D_B3_21 -> BRAMSITE_M2_B17 , 
+  pip BRAMR25C1 BRAM_FAN_BX3 -> BRAM_DIA_B16 , 
+  pip BRAMR25C1 BRAM_FAN_BY1 -> BRAM_DIA_B17 , 
+  pip BRAMR25C1 N2MID5 -> BRAM_DIA_B19 , 
+  pip BRAMR25C1 N2MID5 -> BRAM_FAN_BX3 , 
+  pip BRAMR25C1 N2MID5 -> BRAM_MULTINA_B16 , 
+  pip BRAMR25C1 N2MID5 -> BRAM_MULTINA_B17 , 
+  pip BRAMR25C1 W2MID7 -> BRAM_DIA_B18 , 
+  pip BRAMR25C1 W2MID7 -> BRAM_FAN_BY1 , 
+  pip BRAMR26C1 BRAM_FAN_BX3 -> BRAM_DIA_B16 , 
+  pip BRAMR26C1 BRAM_FAN_BX3 -> BRAM_FAN_BY0 , 
+  pip BRAMR26C1 BRAM_FAN_BX3 -> BRAM_FAN_BY2 , 
+  pip BRAMR26C1 BRAM_FAN_BY0 -> BRAM_DIA_B17 , 
+  pip BRAMR26C1 BRAM_FAN_BY2 -> BRAM_DIA_B18 , 
+  pip BRAMR26C1 W2MID5 -> BRAM_DIA_B19 , 
+  pip BRAMR26C1 W2MID5 -> BRAM_FAN_BX3 , 
+  pip BRAMR26C1 W2MID5 -> N2BEG5 , 
+  pip BRAMR26C1 W2MID5 -> S2BEG5 , 
+  pip BRAMR27C1 S2MID5 -> BRAM_DIA_B19 , 
+  pip R24C15 W6END4 -> W6BEG6 , 
+  pip R24C21 W6END4 -> W6BEG4 , 
+  pip R24C27 W6END4 -> W6BEG4 , 
+  pip R24C3 W6END6 -> S2BEG7 , 
+  pip R24C33 Y1 -> W6BEG4 , 
+  pip R24C9 W6END6 -> W6BEG6 , 
+  pip R25C3 S2MID7 -> W2BEG7 , 
+  pip R26C3 S2END7 -> W2BEG5 , 
+  ;
+
+net "u_btn.clk" , 
+  outpin "$auto$clkbufmap.cc:268:execute$58777" O ,
+  inpin "bass[0]" CLK ,
+  inpin "bass[1]" CLK ,
+  inpin "bass[3]" CLK ,
+  inpin "bass[4]" CLK ,
+  inpin "level[0]" CLK ,
+  inpin "level[1]" CLK ,
+  inpin "level[2]" CLK ,
+  inpin "level[4]" CLK ,
+  inpin "level[5]" CLK ,
+  inpin "level[6]" CLK ,
+  ;

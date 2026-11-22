@@ -21,3 +21,5 @@ tokio.workspace = true
 tokio-util.workspace = true
 similar.workspace = true
 fpgaflow-ai.workspace = true
+fpgaflow-layout.workspace = true
+dirs.workspace = true

@@ -1,0 +1,41 @@
+# =======================================================
+# XDL REPORT MODE $Revision: 1.8 $
+# time: Sun Nov 22 20:36:59 2026
+# cmd: /home/paul/Xilink/14.7/ISE_DS/ISE/bin/lin64/unwrapped/xdl -report xc3s1500fg320 dev.xdlrc
+# =======================================================
+(xdl_resource_report v0.2 xc3s1500fg320-5 spartan3
+# **************************************************************************
+# *                                                                        *
+# * Tile Resources                                                         *
+# *                                                                        *
+# **************************************************************************
+(tiles 79 63
+(tiles 79 63
+	(tile 2 1 LIOIR1 LIOIS 5
+		(primitive_site VCC_X0Y64 VCC internal 1)
+		(primitive_site RLL_X0Y64 RESERVED_LL internal 8)
+		(primitive_site C3 DIFFS bonded 21)
+		(primitive_site C2 DIFFM bonded 21)
+		(primitive_site NOPAD180 IOB unbonded 21)
+	)
+	(tile 5 5 BMR4C1 BRAMSITE 2
+		(primitive_site RAMB16_X0Y15 RAMB16 internal 180)
+		(primitive_site MULT18X18_X0Y15 MULT18X18 internal 75)
+	)
+	(tile 5 6 R4C3 CENTER 6
+		(primitive_site RLL_X4Y61 RESERVED_LL internal 8)
+		(primitive_site VCC_X4Y61 VCC internal 1)
+		(primitive_site SLICE_X4Y120 SLICEM internal 32)
+		(primitive_site SLICE_X4Y121 SLICEM internal 32)
+		(primitive_site SLICE_X5Y120 SLICEL internal 25)
+		(primitive_site SLICE_X5Y121 SLICEL internal 25)
+	)
+)
+(primitive_defs 20
+	(primitive_def SLICEL 25 76
+	)
+)
+# *                                                                        *
+# **************************************************************************
+(summary tiles=4977 sites=21941 sitedefs=20)
+)
