@@ -383,9 +383,9 @@ fn newer(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// Load (generating with ISE where needed) the device, package and the last
-/// build's placement for the project's target. ISE designs only for now.
-pub async fn layout(project: &Project, cfg: &UserConfig, ctx: &Ctx) -> Result<LayoutData> {
+/// The target's full part (`xc3s1500-4-fg320`) and device + package
+/// (`xc3s1500fg320`); ISE targets only for now.
+fn ise_part(project: &Project) -> Result<(String, String)> {
     let t = project
         .file
         .target
@@ -403,6 +403,33 @@ pub async fn layout(project: &Project, cfg: &UserConfig, ctx: &Ctx) -> Result<La
         t.device.as_deref().unwrap_or_default(),
         t.package.as_deref().unwrap_or_default()
     );
+    Ok((part, devpkg))
+}
+
+/// The package file for `devpkg`, generated with partgen once per part.
+async fn package_file(cfg: &UserConfig, devpkg: &str, ctx: &Ctx) -> Result<PathBuf> {
+    let dir = device_cache_dir();
+    std::fs::create_dir_all(&dir)?;
+    let pkg = dir.join(format!("{devpkg}.pkg"));
+    if !pkg.is_file() {
+        // partgen also writes partlist files; keep them out of the cache.
+        let tmp = dir.join(format!("partgen-{devpkg}"));
+        std::fs::create_dir_all(&tmp)?;
+        let s = ctx.run(&ise::plan_package(cfg, devpkg, &tmp)?).await?;
+        let made = tmp.join(format!("{devpkg}.pkg"));
+        if !s.ok || !made.is_file() {
+            anyhow::bail!("partgen -v {devpkg} failed");
+        }
+        std::fs::rename(&made, &pkg)?;
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+    Ok(pkg)
+}
+
+/// Load (generating with ISE where needed) the device, package and the last
+/// build's placement for the project's target. ISE designs only for now.
+pub async fn layout(project: &Project, cfg: &UserConfig, ctx: &Ctx) -> Result<LayoutData> {
+    let (part, devpkg) = ise_part(project)?;
     let dir = device_cache_dir();
     std::fs::create_dir_all(&dir)?;
 
@@ -418,19 +445,7 @@ pub async fn layout(project: &Project, cfg: &UserConfig, ctx: &Ctx) -> Result<La
             anyhow::bail!("xdl -report {devpkg} failed");
         }
     }
-    let pkg = dir.join(format!("{devpkg}.pkg"));
-    if !pkg.is_file() {
-        // partgen also writes partlist files; keep them out of the cache.
-        let tmp = dir.join(format!("partgen-{devpkg}"));
-        std::fs::create_dir_all(&tmp)?;
-        let s = ctx.run(&ise::plan_package(cfg, &devpkg, &tmp)?).await?;
-        let made = tmp.join(format!("{devpkg}.pkg"));
-        if !s.ok || !made.is_file() {
-            anyhow::bail!("partgen -v {devpkg} failed");
-        }
-        std::fs::rename(&made, &pkg)?;
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
+    let pkg = package_file(cfg, &devpkg, ctx).await?;
     let device = Device::parse(&std::fs::read_to_string(&xdlrc)?);
     let package = Package::parse(&std::fs::read_to_string(&pkg)?);
 
@@ -460,6 +475,158 @@ pub async fn layout(project: &Project, cfg: &UserConfig, ctx: &Ctx) -> Result<La
         paths,
         xdl: xdl_used,
     })
+}
+
+/// What the pin planner works with.
+pub struct PinData {
+    pub part: String,
+    pub package: Package,
+    /// Top-level port bits, named as a UCF names them (`led<0>`).
+    pub ports: Vec<fpgaflow_layout::pins::PortBit>,
+    pub board: Option<&'static fpgaflow_core::board::Board>,
+    /// Board net names by ball (`D2` -> `LED<0>`) from its master UCF.
+    pub labels: std::collections::BTreeMap<String, String>,
+    /// The project's constraint files.
+    pub files: Vec<PathBuf>,
+    /// Where new assignments go: the first constraint file.
+    pub new_file: PathBuf,
+}
+
+impl PinData {
+    pub fn assignments(&self) -> Vec<fpgaflow_layout::pins::Assignment> {
+        use fpgaflow_layout::pins::{read_assignments, read_files};
+        read_assignments(&read_files(&self.files))
+    }
+    pub fn issues(
+        &self,
+        assigned: &[fpgaflow_layout::pins::Assignment],
+    ) -> Vec<fpgaflow_layout::pins::Issue> {
+        fpgaflow_layout::pins::check(&self.ports, assigned, &self.package, self.board)
+    }
+}
+
+/// Load the package, the design's ports and the constraint files for the
+/// pin planner. A project with no constraint file gets `constraints/pins.ucf`
+/// listed in `[target]` (the file is created on the first assignment).
+pub async fn pin_data(project: &Project, cfg: &UserConfig, ctx: &Ctx) -> Result<PinData> {
+    let (part, devpkg) = ise_part(project)?;
+    let pkg = package_file(cfg, &devpkg, ctx).await?;
+    let package = Package::parse(&std::fs::read_to_string(pkg)?);
+    let design = analyse(project, cfg, None)?;
+    let top = design.top().context("Yosys found no top module")?;
+    let ports = fpgaflow_layout::pins::port_bits(top.ports.iter().map(|p| {
+        let dir = match p.direction {
+            design::Direction::Input => "input",
+            design::Direction::Output => "output",
+            design::Direction::Inout => "inout",
+        };
+        (p.name.as_str(), p.width, dir)
+    }));
+    let board = fpgaflow_pnr::project_board(project);
+    let labels = board
+        .map(fpgaflow_layout::pins::board_labels)
+        .unwrap_or_default();
+    let mut files = fpgaflow_pnr::constraint_files(project);
+    if files.is_empty() {
+        add_constraint_file(project, "constraints/pins.ucf")?;
+        files.push(project.root.join("constraints/pins.ucf"));
+    }
+    Ok(PinData {
+        part,
+        package,
+        ports,
+        board,
+        labels,
+        new_file: files[0].clone(),
+        files,
+    })
+}
+
+/// List `rel` in `[target] constraints` of fpgaflow.toml, editing the text in
+/// place so comments and layout survive. No-op if it is already listed.
+pub fn add_constraint_file(project: &Project, rel: &str) -> Result<()> {
+    let listed = project
+        .file
+        .target
+        .as_ref()
+        .is_some_and(|t| t.constraints.iter().any(|c| c.as_os_str() == rel));
+    if listed {
+        return Ok(());
+    }
+    let path = project.manifest_path();
+    let text = std::fs::read_to_string(&path)?;
+    std::fs::write(&path, add_constraint_text(&text, rel))?;
+    Ok(())
+}
+
+fn add_constraint_text(text: &str, rel: &str) -> String {
+    let mut lines: Vec<String> = text.lines().map(String::from).collect();
+    let item = format!("\"{rel}\"");
+    match lines.iter().position(|l| l.trim() == "[target]") {
+        None => {
+            lines.push(String::new());
+            lines.push("[target]".into());
+            lines.push(format!("constraints = [{item}]"));
+        }
+        Some(t) => {
+            let end = lines[t + 1..]
+                .iter()
+                .position(|l| l.trim_start().starts_with('['))
+                .map(|i| t + 1 + i)
+                .unwrap_or(lines.len());
+            match (t + 1..end).find(|&i| lines[i].trim_start().starts_with("constraints")) {
+                None => lines.insert(t + 1, format!("constraints = [{item}]")),
+                Some(k) => {
+                    // The closing bracket: on this line, or on a later one.
+                    let close = (k..end).find(|&i| lines[i].contains(']')).unwrap_or(k);
+                    let l = lines[close].clone();
+                    let at = l.rfind(']').unwrap_or(l.len());
+                    let before = l[..at].trim_end();
+                    if before.is_empty() {
+                        // `]` on its own line: add a line in the list's style.
+                        let indent: String = lines[close - 1]
+                            .chars()
+                            .take_while(|c| c.is_whitespace())
+                            .collect();
+                        lines.insert(close, format!("{indent}{item},"));
+                    } else {
+                        let sep = if before.ends_with('[') { "" } else { ", " };
+                        lines[close] = format!("{before}{sep}{item}{}", &l[at..]);
+                    }
+                }
+            }
+        }
+    }
+    let mut out = lines.join("\n");
+    out.push('\n');
+    out
+}
+
+#[cfg(test)]
+mod constraint_list_tests {
+    use super::add_constraint_text;
+
+    #[test]
+    fn adds_to_existing_list_or_creates_one() {
+        let one = "[target]\nboard = \"rc10\"\nconstraints = [\"constraints/a.ucf\"]  # pins\n\n[program]\nmode = \"sram\"\n";
+        assert_eq!(
+            add_constraint_text(one, "constraints/floorplan.ucf"),
+            "[target]\nboard = \"rc10\"\nconstraints = [\"constraints/a.ucf\", \"constraints/floorplan.ucf\"]  # pins\n\n[program]\nmode = \"sram\"\n"
+        );
+        let multi = "[target]\nconstraints = [\n    \"a.ucf\",\n]\n";
+        assert_eq!(
+            add_constraint_text(multi, "b.ucf"),
+            "[target]\nconstraints = [\n    \"a.ucf\",\n    \"b.ucf\",\n]\n"
+        );
+        assert_eq!(
+            add_constraint_text("[target]\nboard = \"x\"\n", "p.ucf"),
+            "[target]\nconstraints = [\"p.ucf\"]\nboard = \"x\"\n"
+        );
+        assert_eq!(
+            add_constraint_text("[project]\nname = \"x\"\n", "p.ucf"),
+            "[project]\nname = \"x\"\n\n[target]\nconstraints = [\"p.ucf\"]\n"
+        );
+    }
 }
 
 // ------------------------------------------------------------------ Claude

@@ -111,6 +111,12 @@ enum Cmd {
         #[arg(long)]
         net: Option<String>,
     },
+    /// Pin planner: list pin assignments and problems, or change one
+    /// (writes the project's UCF; ISE targets).
+    Pins {
+        #[command(subcommand)]
+        cmd: Option<PinsCmd>,
+    },
     /// List known dev boards.
     Boards,
     /// Scan USB for dev boards and programming cables.
@@ -138,6 +144,15 @@ enum Cmd {
         #[arg(long)]
         top: Option<String>,
     },
+}
+
+#[derive(Subcommand)]
+enum PinsCmd {
+    /// Put a port bit on a pin, e.g. `pins set led[0] D2` (sets the bank's
+    /// I/O standard when the board profile knows it).
+    Set { port: String, pin: String },
+    /// Remove a port bit's pin (comments the UCF line out).
+    Clear { port: String },
 }
 
 fn main() -> Result<()> {
@@ -172,6 +187,11 @@ fn main() -> Result<()> {
         Cmd::Families => flow::families(),
         Cmd::Program { bit } => flow::program(&cli.dir, &cfg, bit),
         Cmd::Detect => flow::detect(&cli.dir, &cfg),
+        Cmd::Pins { cmd } => match cmd {
+            None => flow::pins(&cli.dir, &cfg),
+            Some(PinsCmd::Set { port, pin }) => flow::pins_set(&cli.dir, &cfg, &port, Some(&pin)),
+            Some(PinsCmd::Clear { port }) => flow::pins_set(&cli.dir, &cfg, &port, None),
+        },
         Cmd::Layout { paths, inst, net } => {
             flow::layout(&cli.dir, &cfg, paths, inst.as_deref(), net.as_deref())
         }

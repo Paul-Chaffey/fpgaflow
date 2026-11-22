@@ -89,6 +89,7 @@ pub struct AiResult {
 
 pub enum Msg {
     Layout(Result<std::sync::Arc<fpgaflow_flow::LayoutData>, String>),
+    Pins(Result<std::sync::Arc<fpgaflow_flow::PinData>, String>),
     Ai(fpgaflow_flow::ai::AiEvent),
     AiDone(Result<AiResult, String>),
     Event(JobEvent),
@@ -185,6 +186,39 @@ pub fn spawn_layout(
         drop(ctx);
         let _ = forward.await;
         let _ = tx.send(Msg::Layout(
+            r.map(std::sync::Arc::new).map_err(|e| format!("{e:#}")),
+        ));
+        repaint.request_repaint();
+    });
+}
+
+/// Load the package, ports and constraint files for the Pins tab.
+pub fn spawn_pins(
+    rt: &tokio::runtime::Runtime,
+    repaint: egui::Context,
+    tx: Sender<Msg>,
+    project: Project,
+    cfg: UserConfig,
+) {
+    rt.spawn(async move {
+        let (etx, mut erx) = tokio::sync::mpsc::unbounded_channel();
+        let (fwd_tx, fwd_repaint) = (tx.clone(), repaint.clone());
+        let forward = tokio::spawn(async move {
+            while let Some(ev) = erx.recv().await {
+                if fwd_tx.send(Msg::Event(ev)).is_err() {
+                    break;
+                }
+                fwd_repaint.request_repaint();
+            }
+        });
+        let ctx = Ctx {
+            events: etx,
+            cancel: CancellationToken::new(),
+        };
+        let r = fpgaflow_flow::pin_data(&project, &cfg, &ctx).await;
+        drop(ctx);
+        let _ = forward.await;
+        let _ = tx.send(Msg::Pins(
             r.map(std::sync::Arc::new).map_err(|e| format!("{e:#}")),
         ));
         repaint.request_repaint();

@@ -1546,6 +1546,8 @@ dependencies = [
 name = "fpgaflow-layout"
 version = "0.1.0"
 dependencies = [
+ "fpgaflow-core",
+ "fpgaflow-pnr",
  "regex",
  "tempfile",
 ]

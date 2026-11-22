@@ -440,6 +440,102 @@ pub fn layout(
     Ok(())
 }
 
+fn load_pins(dir: &Path, cfg: &UserConfig) -> Result<(Project, fpgaflow_flow::PinData)> {
+    let project = Project::find(dir)?;
+    let d = run(|ctx| {
+        let project = &project;
+        async move { fpgaflow_flow::pin_data(project, cfg, &ctx).await }
+    })?;
+    Ok((project, d))
+}
+
+pub fn pins(dir: &Path, cfg: &UserConfig) -> Result<()> {
+    let (project, d) = load_pins(dir, cfg)?;
+    let assigned = d.assignments();
+    println!("{} ({} port bits)", d.part, d.ports.len());
+    for p in &d.ports {
+        let a = assigned
+            .iter()
+            .find(|a| fpgaflow_flow::layout_model::pins::normalise(&a.net) == p.name);
+        match a {
+            Some(a) => {
+                let pp = d.package.pin(&a.pin);
+                let bank = pp
+                    .and_then(|x| x.bank)
+                    .map(|b| format!("bank {b}"))
+                    .unwrap_or_default();
+                let label = d.labels.get(&a.pin).map(String::as_str).unwrap_or("");
+                println!(
+                    "  {:<6} {:<12} {:<5} {:<7} {:<9} {:<14} {}:{}",
+                    p.direction,
+                    p.name,
+                    a.pin,
+                    bank,
+                    a.iostandard.as_deref().unwrap_or("-"),
+                    label,
+                    rel(&project, &a.file).display(),
+                    a.line
+                );
+            }
+            None => println!("  {:<6} {:<12} -", p.direction, p.name),
+        }
+    }
+    let issues = d.issues(&assigned);
+    if issues.is_empty() {
+        println!("no problems");
+    } else {
+        println!("\n{} problem(s):", issues.len());
+        for i in &issues {
+            let tag = match i.severity() {
+                fpgaflow_flow::layout_model::pins::Severity::Error => "error",
+                fpgaflow_flow::layout_model::pins::Severity::Warning => "warning",
+            };
+            println!("  {tag}: {i}");
+        }
+    }
+    Ok(())
+}
+
+/// `pins set PORT PIN` (Some) or `pins clear PORT` (None).
+pub fn pins_set(dir: &Path, cfg: &UserConfig, port: &str, pin: Option<&str>) -> Result<()> {
+    use fpgaflow_flow::layout_model::pins;
+    let (project, d) = load_pins(dir, cfg)?;
+    let assigned = d.assignments();
+    let key = pins::normalise(port);
+    if !d.ports.iter().any(|p| p.name == key) {
+        bail!(
+            "{port} is not a top-level port bit (ports: {})",
+            d.ports
+                .iter()
+                .map(|p| p.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    let changed = match pin {
+        Some(pin) => {
+            pins::can_assign(&key, pin, &assigned, &d.package, d.board)
+                .map_err(anyhow::Error::msg)?;
+            let standard = d
+                .package
+                .pin(pin)
+                .and_then(|p| p.bank)
+                .and_then(|b| d.board.and_then(|bd| bd.bank_standard(b)));
+            Some(pins::set_pin(&assigned, &d.new_file, &key, pin, standard)?)
+        }
+        None => pins::clear_pin(&assigned, &key)?,
+    };
+    match changed {
+        Some(f) => println!("updated {}", rel(&project, &f).display()),
+        None => println!("{port} had no pin"),
+    }
+    let issues = d.issues(&d.assignments());
+    for i in &issues {
+        println!("  {i}");
+    }
+    Ok(())
+}
+
 /// Long Yosys-derived names shortened in the middle for one-line output.
 fn short(s: &str, max: usize) -> String {
     let n = s.chars().count();

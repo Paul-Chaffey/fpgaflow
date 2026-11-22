@@ -2,6 +2,7 @@
 
 mod app;
 mod device_view;
+mod pin_view;
 mod splash;
 mod worker;
 

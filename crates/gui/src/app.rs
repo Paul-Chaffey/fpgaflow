@@ -18,6 +18,7 @@ use fpgaflow_flow::BuildOutput;
 use tokio_util::sync::CancellationToken;
 
 use crate::device_view::{DeviceRequest, DeviceView};
+use crate::pin_view::{PinRequest, PinView};
 use crate::worker::{self, Action, Msg, Outcome, Slot, SynthView};
 
 const MAX_LOG_LINES: usize = 50_000;
@@ -29,6 +30,7 @@ enum Tab {
     Problems,
     Reports,
     Device,
+    Pins,
     Boards,
     Doctor,
     Settings,
@@ -129,6 +131,7 @@ pub struct App {
     new_project: NewProjectForm,
     ai: AiPanel,
     device: DeviceView,
+    pins: PinView,
     splash: crate::splash::Splash,
 }
 
@@ -172,6 +175,7 @@ impl App {
             new_project: NewProjectForm::default(),
             ai: AiPanel::default(),
             device: DeviceView::default(),
+            pins: PinView::default(),
             splash: crate::splash::Splash::new(&cc.egui_ctx),
         };
         match worker::start_hotplug(app.repaint.clone(), app.tx.clone()) {
@@ -200,6 +204,7 @@ impl App {
             Some("problems") => Tab::Problems,
             Some("reports") => Tab::Reports,
             Some("device") => Tab::Device,
+            Some("pins") => Tab::Pins,
             Some("boards") => Tab::Boards,
             Some("doctor") => Tab::Doctor,
             Some("settings") => Tab::Settings,
@@ -233,6 +238,7 @@ impl App {
         self.last_synth = None;
         self.last_build = None;
         self.device.clear();
+        self.pins.clear();
         self.note(format!(
             "opened project {} ({})",
             p.file.project.name,
@@ -251,6 +257,24 @@ impl App {
             let excess = self.log.len() - MAX_LOG_LINES;
             self.log.drain(..excess);
         }
+    }
+
+    fn load_pins(&mut self) {
+        let Some(project) = self.project.clone() else {
+            return;
+        };
+        if self.pins.loading {
+            return;
+        }
+        self.pins.loading = true;
+        self.pins.error = None;
+        worker::spawn_pins(
+            &self.rt,
+            self.repaint.clone(),
+            self.tx.clone(),
+            project,
+            self.cfg.clone(),
+        );
     }
 
     fn load_layout(&mut self) {
@@ -331,6 +355,12 @@ impl App {
                 ),
             },
             Msg::Done(action, result) => self.finish(action, result),
+            Msg::Pins(r) => {
+                if let Err(e) = &r {
+                    self.push_log(LineKind::Err, format!("pins: {e}"));
+                }
+                self.pins.set_data(r);
+            }
             Msg::Layout(r) => {
                 if let Err(e) = &r {
                     self.push_log(LineKind::Err, format!("layout: {e}"));
@@ -449,6 +479,10 @@ impl App {
     }
 
     fn on_fs_change(&mut self, paths: Vec<PathBuf>) {
+        // A UCF edited in the editor (or by the pin planner) updates the Pins tab.
+        if paths.iter().any(|p| self.pins.watches(p)) {
+            self.pins.refresh();
+        }
         let Some(p) = &self.project else { return };
         let manifest = p.manifest_path();
         if paths.contains(&manifest) {
@@ -773,6 +807,7 @@ impl App {
                 (Tab::Problems, format!("Problems ({errors}E/{warns}W)")),
                 (Tab::Reports, "Reports".to_string()),
                 (Tab::Device, "Device".to_string()),
+                (Tab::Pins, "Pins".to_string()),
                 (
                     Tab::Boards,
                     format!(
@@ -803,6 +838,13 @@ impl App {
                     self.load_layout();
                 }
             }
+            Tab::Pins => match self.pins.ui(ui) {
+                Some(PinRequest::Load) => self.load_pins(),
+                Some(PinRequest::Open(file, line)) => {
+                    self.open_in_editor(&file, Some(Position { line, col: None }))
+                }
+                None => {}
+            },
             Tab::Boards => self.boards_view(ui),
             Tab::Doctor => self.doctor_view(ui),
             Tab::Settings => self.settings_view(ui),

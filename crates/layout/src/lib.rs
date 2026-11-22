@@ -10,6 +10,7 @@
 
 pub mod device;
 pub mod package;
+pub mod pins;
 pub mod placed;
 
 pub use device::{site_xy, Device, Site, Tile, TileClass};
