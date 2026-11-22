@@ -34,17 +34,26 @@ pub struct Board {
     pub backend: String,
     /// Master constraint file, relative to `data/`.
     pub ucf: String,
-    /// `VID:PID` pairs (lower-case hex) the board's programmer enumerates as.
+    /// `VID:PID` pairs (lower-case hex) that mean the board is connected:
+    /// its programmer, or the board's own USB port.
     pub usb: Vec<String>,
-    pub program: ProgramProfile,
+    /// How openFPGALoader reaches the FPGA; `None` until a cable is known.
+    #[serde(default)]
+    pub program: Option<ProgramProfile>,
 }
 
 /// Master constraint files shipped in `data/`, compiled in so a new
 /// project can get a copy without knowing where fpgaflow is installed.
-const UCFS: &[(&str, &str)] = &[(
-    "boards/s3an-starter.ucf",
-    include_str!("../../../data/boards/s3an-starter.ucf"),
-)];
+const UCFS: &[(&str, &str)] = &[
+    (
+        "boards/s3an-starter.ucf",
+        include_str!("../../../data/boards/s3an-starter.ucf"),
+    ),
+    (
+        "boards/rc10.ucf",
+        include_str!("../../../data/boards/rc10.ucf"),
+    ),
+];
 
 impl Board {
     /// Text of this board's master constraint file.
@@ -106,8 +115,9 @@ mod tests {
     #[test]
     fn s3an_starter() {
         let b = board("s3an-starter").unwrap();
-        assert_eq!(b.program.cable, "xilinxPlatformCableUsb_alt");
-        assert_eq!(b.program.freq, Some(750_000));
+        let p = b.program.as_ref().unwrap();
+        assert_eq!(p.cable, "xilinxPlatformCableUsb_alt");
+        assert_eq!(p.freq, Some(750_000));
         assert!(b.matches_usb(0x03fd, 0x000d));
         assert!(b.matches_usb(0x03fd, 0x0008));
         assert!(!b.matches_usb(0x0403, 0x6010));
@@ -115,5 +125,19 @@ mod tests {
             .ucf_text()
             .unwrap()
             .contains(r#"NET "CLK_50MHZ" LOC = "E12""#));
+    }
+
+    #[test]
+    fn rc10() {
+        let b = board("rc10").unwrap();
+        assert_eq!(
+            (b.device.as_str(), b.package.as_str()),
+            ("xc3s1500", "fg320")
+        );
+        assert!(b.matches_usb(0x107a, 0x9005));
+        assert!(b.program.is_none(), "its USB port is not a JTAG cable");
+        let ucf = b.ucf_text().unwrap();
+        assert!(ucf.contains(r#"NET "CLK_48MHZ" LOC = "P10""#));
+        assert!(ucf.contains(r#"NET "LED<0>" LOC = "D2""#));
     }
 }

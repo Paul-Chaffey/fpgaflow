@@ -31,6 +31,8 @@ pub enum ProgramError {
     NoFirmware(String),
     #[error("flash programming is not supported for {0} yet; use [program] mode = \"sram\"")]
     FlashNotSupported(String),
+    #[error("no JTAG cable is set up for the {0} yet (see its notes in data/boards.toml)")]
+    NoProgrammer(String),
 }
 
 pub fn project_board(project: &Project) -> Result<&'static Board, ProgramError> {
@@ -59,7 +61,10 @@ pub fn resolve_firmware(spec: &str, cfg: &UserConfig) -> Result<PathBuf, Program
 }
 
 fn cable_args(b: &Board, cfg: &UserConfig) -> Result<Vec<String>, ProgramError> {
-    let p = &b.program;
+    let p = b
+        .program
+        .as_ref()
+        .ok_or_else(|| ProgramError::NoProgrammer(b.name.clone()))?;
     let mut a = vec!["-c".to_string(), p.cable.clone()];
     if let Some(fw) = &p.firmware {
         a.push("--probe-firmware".into());

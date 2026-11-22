@@ -29,3 +29,23 @@ cable = "xilinxPlatformCableUsb_alt"
 firmware = "ise:xusb_emb.hex"
 freq = 750000
 index_chain = 0
+
+[[board]]
+id = "rc10"
+name = "Celoxica RC10"
+family = "spartan3"
+device = "xc3s1500"
+package = "fg320"
+speed = "4"
+backend = "ise"
+ucf = "boards/rc10.ucf"
+# The board's own USB port (Cypress FX2 with Celoxica firmware), seen
+# 2026-11-22. It only means "board connected": it is not a JTAG cable.
+usb = ["107a:9005"]
+# Pins from the Celoxica RC10 manual, section 3; all 183 LOCs checked against
+# ISE's xc3s1500fg320 package file. The manual says XC3S1500L-4FG320; this
+# board's chip reads XC3S1500 (both have IDCODE 0x01434093).
+# Programming: the USB port speaks Celoxica's FTU3 protocol (Windows only),
+# so programming goes through the board's JTAG connector, where the FPGA is
+# alone on the chain (manual 3.19). No [board.program] until a cable is
+# chosen and tested.

@@ -340,7 +340,11 @@ pub fn boards() -> Result<()> {
         println!("{:<14} {}", b.id, b.name);
         println!(
             "               {}-{}-{} via {}, cable {}",
-            b.device, b.speed, b.package, b.backend, b.program.cable
+            b.device,
+            b.speed,
+            b.package,
+            b.backend,
+            b.program.as_ref().map_or("none yet", |p| p.cable.as_str())
         );
     }
     Ok(())
