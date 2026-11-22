@@ -149,11 +149,38 @@ A splash with the icon shows for a few seconds at start-up, and again from
 - **Boards tab and status bar:** USB boards and cables, updated live as you
   plug them in. *Program* is enabled only while the project's board is
   connected.
+- **Device tab:** the die as ISE placed and routed the design, slices
+  coloured by module, routing density, critical paths drawn site by site,
+  and floorplan regions you draw yourself (see *Layout tools* below).
+- **Pins tab:** a pin planner on the package's ball grid.
 - **Doctor tab:** tool versions and host checks.
 - **Settings tab:** choose the editor.
 - **New project:** pick a board and its UCF is copied into the project.
 - **File watching:** saving a file in the external editor marks finished
   stages as stale; saving `fpgaflow.toml` reloads the project.
+
+## Layout tools (ISE designs)
+
+fpgaflow reads what ISE did through text it can export: the device
+(`xdl -report`, cached once per part in `~/.cache/fpgaflow/devices`), the
+package (`partgen -v`), the placed and routed design (`xdl -ncd2xdl`, after
+each build) and the detailed timing report. Yosys's `autoname` gives the
+synthesised cells names like `u_synth.mix_l[8]`, so placement, timing paths
+and area groups can be tied back to modules.
+
+- **Device view** (`fpgaflow layout`, Device tab): use per module, the worst
+  paths with the slice at each step, any instance or net, a routing-density
+  heat map.
+- **Pin planner** (`fpgaflow pins`, `pins set led[0] D2`, `pins clear clk`,
+  Pins tab): checks every assignment against the package and the board
+  (unassigned ports, configuration or power balls, reserved pins, a pin used
+  twice, an I/O standard that disagrees with the bank voltage, a clock off
+  its GCLK pins) and edits the project's UCF in place.
+- **Floorplanner** (`fpgaflow floorplan set u_synth SLICE_X0Y0:SLICE_X23Y31`,
+  Device tab > Floorplan): confines a top-level module to a rectangle as an
+  ISE `AREA_GROUP` in `constraints/floorplan.ucf`, including the multipliers
+  and block RAMs inside it; after the next build each region reports how
+  many of the module's slices landed inside.
 
 ## Quick start
 
