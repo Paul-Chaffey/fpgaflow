@@ -89,6 +89,17 @@ are next.
 cargo run --release -p fpgaflow-gui -- examples/blinky
 ```
 
+To install it for your user (no root needed), with an icon and an
+**Engineering → FPGA Flow** entry in the KDE / freedesktop application menu:
+
+```sh
+scripts/install-desktop.sh              # release build into ~/.local/bin, menu entry, icon
+scripts/install-desktop.sh --uninstall  # remove it all again
+```
+
+A splash with the icon shows for a few seconds at start-up, and again from
+**Help → About FPGA Flow**.
+
 - **Flow bar:** Lint → Simulate (Icarus or Verilator) → Waves → Synthesise →
   Build → Program, each with a status mark: ○ not run, ✔ ok, ✖ failed, yellow ✔
   sources changed since.

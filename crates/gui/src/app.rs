@@ -126,6 +126,7 @@ pub struct App {
     doctor: Option<(Vec<ToolStatus>, Vec<HostCheck>)>,
     new_project: NewProjectForm,
     ai: AiPanel,
+    splash: crate::splash::Splash,
 }
 
 impl App {
@@ -163,6 +164,7 @@ impl App {
             doctor: None,
             new_project: NewProjectForm::default(),
             ai: AiPanel::default(),
+            splash: crate::splash::Splash::new(&cc.egui_ctx),
         };
         match worker::start_hotplug(app.repaint.clone(), app.tx.clone()) {
             Ok((present, w)) => {
@@ -504,6 +506,12 @@ impl App {
                 if ui.button("Clear log").clicked() {
                     ui.close();
                     self.log.clear();
+                }
+            });
+            ui.menu_button("Help", |ui| {
+                if ui.button("About FPGA Flow").clicked() {
+                    ui.close();
+                    self.splash.show_about();
                 }
             });
         });
@@ -1459,6 +1467,7 @@ impl eframe::App for App {
             });
         egui::CentralPanel::default().show(ui, |ui| self.tabs(ui));
         self.new_project_window(&ctx);
+        self.splash.ui(&ctx);
     }
 }
 

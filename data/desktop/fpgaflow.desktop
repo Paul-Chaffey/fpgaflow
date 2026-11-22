@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=FPGA Flow
+GenericName=FPGA Design Flow
+Comment=Verilog/SystemVerilog to bitstream: simulate, synthesise, place & route and program FPGAs
+Exec=@BIN@ %f
+Icon=fpgaflow
+Terminal=false
+Categories=Engineering;Electronics;
+Keywords=FPGA;Verilog;SystemVerilog;Yosys;HDL;Simulation;
+StartupWMClass=fpgaflow
+StartupNotify=true
