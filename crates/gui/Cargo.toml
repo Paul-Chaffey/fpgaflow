@@ -1,0 +1,26 @@
+[package]
+name = "fpgaflow-gui"
+description = "fpgaflow desktop GUI (egui)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "fpgaflow-gui"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+eframe = "0.37"
+fpgaflow-core.workspace = true
+fpgaflow-editor.workspace = true
+fpgaflow-flow.workspace = true
+fpgaflow-hdl.workspace = true
+fpgaflow-synth.workspace = true
+notify = "9"
+rfd = "0.18"
+tokio.workspace = true
+tokio-util.workspace = true

@@ -83,6 +83,30 @@ are next.
 4. `fpgaflow build && fpgaflow program`. The JTAG clock is 750 kHz: at 6 MHz
    this cable's IDCODE reads overflowed.
 
+## GUI
+
+```sh
+cargo run --release -p fpgaflow-gui -- examples/blinky
+```
+
+- **Flow bar:** Lint → Simulate (Icarus or Verilator) → Waves → Synthesise →
+  Build → Program, each with a status mark: ○ not run, ✔ ok, ✖ failed, yellow ✔
+  sources changed since.
+- **Project tree:** RTL, testbench and constraint files plus `fpgaflow.toml`,
+  each opening in your editor (Kate by default).
+- **Problems tab:** compiler, Yosys and ISE diagnostics; click one to open the
+  file at that line and column.
+- **Reports tab:** simulation PASS/FAIL, synthesis utilisation,
+  implementation resources, timing (Fmax) and the pin table.
+- **Boards tab and status bar:** USB boards and cables, updated live as you
+  plug them in. *Program* is enabled only while the project's board is
+  connected.
+- **Doctor tab:** tool versions and host checks.
+- **Settings tab:** choose the editor.
+- **New project:** pick a board and its UCF is copied into the project.
+- **File watching:** saving a file in the external editor marks finished
+  stages as stale; saving `fpgaflow.toml` reloads the project.
+
 ## Quick start
 
 ```sh
@@ -146,7 +170,7 @@ mode = "sram"          # or "flash"
    - then the other vendor adapters
 5. Programming *(done for the Spartan-3AN kit)* and live board detection (udev) *(done)*
 6. Claude integration (API and Claude Code CLI)
-7. egui GUI over all of the above, plus packaging
+7. egui GUI over all of the above *(first version done)*, plus packaging
 
 ## Licence
 

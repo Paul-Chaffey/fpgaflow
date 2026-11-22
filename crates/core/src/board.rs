@@ -39,7 +39,24 @@ pub struct Board {
     pub program: ProgramProfile,
 }
 
+/// Master constraint files shipped in `data/`, compiled in so a new
+/// project can get a copy without knowing where fpgaflow is installed.
+const UCFS: &[(&str, &str)] = &[(
+    "boards/s3an-starter.ucf",
+    include_str!("../../../data/boards/s3an-starter.ucf"),
+)];
+
 impl Board {
+    /// Text of this board's master constraint file.
+    pub fn ucf_text(&self) -> Option<&'static str> {
+        UCFS.iter().find(|(p, _)| *p == self.ucf).map(|(_, t)| *t)
+    }
+
+    /// File name for the board's UCF inside a project (`constraints/<id>.ucf`).
+    pub fn ucf_file_name(&self) -> String {
+        format!("{}.ucf", self.id)
+    }
+
     /// Does this board's programmer use USB `vid:pid`?
     pub fn matches_usb(&self, vid: u16, pid: u16) -> bool {
         let id = format!("{vid:04x}:{pid:04x}");
@@ -77,6 +94,12 @@ mod tests {
                 "{}: backend not valid for family",
                 b.id
             );
+            assert!(
+                b.ucf_text().is_some(),
+                "{}: UCF {} not compiled in",
+                b.id,
+                b.ucf
+            );
         }
     }
 
@@ -88,5 +111,9 @@ mod tests {
         assert!(b.matches_usb(0x03fd, 0x000d));
         assert!(b.matches_usb(0x03fd, 0x0008));
         assert!(!b.matches_usb(0x0403, 0x6010));
+        assert!(b
+            .ucf_text()
+            .unwrap()
+            .contains(r#"NET "CLK_50MHZ" LOC = "E12""#));
     }
 }
