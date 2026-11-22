@@ -1,0 +1,33 @@
+Release 14.7 - par P.20131013 (lin64)
+Copyright (c) 1995-2013 Xilinx, Inc.  All rights reserved.
+
+Sun Nov 22 03:25:08 2026
+
+
+INFO: The IO information is provided in three file formats as part of the Place and Route (PAR) process.  These formats are:
+1. The <design name>_pad.txt file (this file) designed to provide information on IO usage in a human readable ASCII text format viewable through common text editors.
+2. The <design namd>_pad.csv file for use with spreadsheet programs such as MS Excel. This file can also be read by PACE to communicate post PAR IO information.
+3. The <design name>.pad file designed for parsing by customers.  It uses the "|" as a data field separator.
+
+INPUT FILE:       blinky_map.ncd
+OUTPUT FILE:      blinky_pad.txt
+PART TYPE:        xc3s700an
+SPEED GRADE:      -4
+PACKAGE:          fgg484
+
+Pinout by Pin Number:
+
++------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+|Pin Number|Signal Name|Pin Usage |Pin Name              |Direction|IO Standard|IO Bank Number|Drive (mA)|Slew Rate|Termination|IOB Delay|Voltage  |Constraint|IO Register|Signal Integrity|
++------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+|A1        |           |          |GND                   |         |           |              |          |         |           |         |         |          |           |                |
+|A2        |           |DIFFSTB   |IO_L36N_0/PUDC_B      |UNUSED   |           |0             |          |         |           |         |         |          |           |                |
+|A3        |           |DIFFMTB   |IO_L33P_0             |UNUSED   |           |0             |          |         |           |         |         |          |           |                |
+|A4        |           |DIFFMTB   |IO_L31P_0             |UNUSED   |           |0             |          |         |           |         |         |          |           |                |
+|A5        |           |DIFFSTB   |IO_L28N_0             |UNUSED   |           |0             |          |         |           |         |         |          |           |                |
+|A6        |           |DIFFSTB   |IO_L26N_0             |UNUSED   |           |0             |          |         |           |         |         |          |           |                |
+|A7        |           |DIFFMTB   |IO_L26P_0             |UNUSED   |           |0             |          |         |           |         |         |          |           |                |
+|A8        |           |DIFFSTB   |IO_L22N_0             |UNUSED   |           |0             |          |         |           |         |         |          |           |                |
+|E12       |clk        |IBUF      |IO_L17N_0/GCLK5       |INPUT    |LVCMOS33   |0             |          |         |           |IBUF     |         |LOCATED   |NO         |NONE            |
+|R20       |led        |IOB       |IO_L13P_1             |OUTPUT   |LVCMOS33   |1             |8         |SLOW     |NONE**     |         |         |LOCATED   |NO         |NONE            |
+|T15       |rst        |IBUF      |IP_2/VREF_2           |INPUT    |LVCMOS33   |2             |          |         |PULLDOWN   |IBUF     |         |LOCATED   |NO         |NONE            |

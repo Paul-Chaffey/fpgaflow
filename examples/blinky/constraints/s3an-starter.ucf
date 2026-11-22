@@ -1,0 +1,12 @@
+# blinky on the Spartan-3AN Starter Kit. Pins and I/O settings from UG334 v1.1
+# (see data/boards/s3an-starter.ucf), renamed to blinky's ports.
+
+# clk <- CLK_50MHZ oscillator (Figure 3-2, 3-3)
+NET "clk" LOC = "E12" | IOSTANDARD = LVCMOS33 ;
+NET "clk" PERIOD = 20.0ns HIGH 40%;
+
+# rst <- BTN_SOUTH (Figure 2-7): pressed = 1, matching blinky's active-high reset
+NET "rst" LOC = "T15" | IOSTANDARD = LVCMOS33 | PULLDOWN ;
+
+# led -> LED<0> (Figure 2-13): High = lit
+NET "led" LOC = "R20" | IOSTANDARD = LVCMOS33 | SLEW = SLOW | DRIVE = 8 ;

@@ -1,0 +1,32 @@
+# Spartan-3AN Starter Kit (HW-SPAR3AN-SK-UNI-G), XC3S700AN-4FGG484.
+# Constraint lines copied verbatim from AMD/Xilinx UG334 v1.1 (June 19, 2008):
+#   clocks Figure 3-2/3-3, push buttons Figure 2-7, rotary push Figure 2-10/2-11,
+#   LEDs Figure 2-13.
+# This is a master file: copy the lines you need into your project and rename
+# the nets to your top-level port names (or name your ports to match).
+
+# ---- Clocks (Figure 3-2, 3-3)
+NET "CLK_50MHZ" LOC = "E12"| IOSTANDARD = LVCMOS33 ;
+NET "CLK_AUX"   LOC = "V12"| IOSTANDARD = LVCMOS33 ;
+NET "CLK_SMA"   LOC = "U12"| IOSTANDARD = LVCMOS33 ;
+# Define clock period for 50 MHz oscillator
+NET "CLK_50MHZ" PERIOD = 20.0ns HIGH 40%;
+
+# ---- Push buttons (Figure 2-7). Pressed = 3.3 V = logic 1; no debouncing.
+NET "BTN_EAST" LOC = "T16" | IOSTANDARD = LVCMOS33 | PULLDOWN ;
+NET "BTN_NORTH" LOC = "T14" | IOSTANDARD = LVCMOS33 | PULLDOWN ;
+NET "BTN_SOUTH" LOC = "T15" | IOSTANDARD = LVCMOS33 | PULLDOWN ;
+NET "BTN_WEST" LOC = "U15" | IOSTANDARD = LVCMOS33 | PULLDOWN ;
+
+# ---- Rotary push button
+NET "ROT_CENTER" LOC = "R13" | IOSTANDARD = LVCMOS33 | PULLDOWN ;
+
+# ---- Discrete LEDs (Figure 2-13). Drive High to light.
+NET "LED<7>" LOC = "W21" | IOSTANDARD = LVCMOS33 | SLEW = SLOW | DRIVE = 8 ;
+NET "LED<6>" LOC = "Y22" | IOSTANDARD = LVCMOS33 | SLEW = SLOW | DRIVE = 8 ;
+NET "LED<5>" LOC = "V20" | IOSTANDARD = LVCMOS33 | SLEW = SLOW | DRIVE = 8 ;
+NET "LED<4>" LOC = "V19" | IOSTANDARD = LVCMOS33 | SLEW = SLOW | DRIVE = 8 ;
+NET "LED<3>" LOC = "U19" | IOSTANDARD = LVCMOS33 | SLEW = SLOW | DRIVE = 8 ;
+NET "LED<2>" LOC = "U20" | IOSTANDARD = LVCMOS33 | SLEW = SLOW | DRIVE = 8 ;
+NET "LED<1>" LOC = "T19" | IOSTANDARD = LVCMOS33 | SLEW = SLOW | DRIVE = 8 ;
+NET "LED<0>" LOC = "R20" | IOSTANDARD = LVCMOS33 | SLEW = SLOW | DRIVE = 8 ;

@@ -40,12 +40,22 @@ Early development. Working today, from the CLI:
 | `fpgaflow hier` | Yosys elaboration: module hierarchy and port lists |
 | `fpgaflow synth [--family F] [--backend B]` | Yosys synthesis for the target; utilisation by resource type; netlist in the backend's format |
 | `fpgaflow families` | the 24 supported families and their P&R backends |
+| `fpgaflow build` | synthesis → place & route → timing → bitstream (ISE backend today) |
 | `fpgaflow edit [file] [--line N --col N]` | open in the configured editor (Kate by default) |
 
 Compiler errors from Icarus, Verilator and Yosys are reported as
-`file:line:col` diagnostics. All 24 families synthesise the blinky example
-with Yosys 0.71. P&R, programming, the GUI and the Claude integration are
-next.
+`file:line:col` diagnostics; ISE constraint errors point at the line in your
+own UCF. All 24 families synthesise the blinky example with Yosys 0.71, and the
+Spartan-3AN goes all the way to a bitstream through ISE 14.7 (timing met at
+222.8 MHz for blinky).
+
+`fpgaflow build` refuses to write a bitstream if any top-level port bit has no
+`LOC` constraint, and again if the pad report shows a pin the tools placed
+themselves: an unconstrained pin can drive a net wired to something else on
+the board. `examples/blinky/constraints/s3an-starter.ucf` and the master
+`data/boards/s3an-starter.ucf` use the pin constraints printed in AMD's UG334.
+
+nextpnr/VPR backends, programming, the GUI and the Claude integration are next.
 
 ## Quick start
 
@@ -103,7 +113,7 @@ mode = "sram"          # or "flash"
 2. Simulation: Icarus and Verilator, GTKWave, clickable diagnostics *(done)*
 3. Synthesis: Yosys for every supported family *(done)*
 4. P&R and bitstream:
-   - ISE 14.7 (Spartan-3AN) first
+   - ISE 14.7 (Spartan-3AN) first *(done)*
    - then nextpnr (iCE40, ECP5)
    - then VPR (generic arch, F4PGA xc7)
    - then Gowin, Nexus, Mistral and openXC7

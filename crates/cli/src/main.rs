@@ -78,6 +78,17 @@ enum Cmd {
         #[arg(long)]
         backend: Option<String>,
     },
+    /// Full implementation: synthesis, place & route, timing, bitstream.
+    Build {
+        #[arg(long)]
+        family: Option<String>,
+        #[arg(long)]
+        backend: Option<String>,
+        /// Build even if some top-level pins have no LOC constraint
+        /// (the tools will pick those pins; unsafe to load on a real board).
+        #[arg(long)]
+        allow_unconstrained: bool,
+    },
     /// List supported FPGA families and their P&R backends.
     Families,
     /// Elaborate the RTL with Yosys and print the module hierarchy and ports.
@@ -118,6 +129,17 @@ fn main() -> Result<()> {
             flow::synth(&cli.dir, &cfg, family.as_deref(), backend.as_deref())
         }
         Cmd::Families => flow::families(),
+        Cmd::Build {
+            family,
+            backend,
+            allow_unconstrained,
+        } => flow::build(
+            &cli.dir,
+            &cfg,
+            family.as_deref(),
+            backend.as_deref(),
+            allow_unconstrained,
+        ),
     }
 }
 

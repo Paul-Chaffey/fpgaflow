@@ -1,0 +1,21 @@
+---------------+---------+---------+---------+---------+
+clk            |    4.489|         |         |         |
+---------------+---------+---------+---------+---------+
+
+
+Timing summary:
+---------------
+
+Timing errors: 0  Score: 0  (Setup/Max: 0, Hold: 0)
+
+Constraints cover 376 paths, 0 nets, and 65 connections
+
+Design statistics:
+   Minimum period:   4.489ns{1}   (Maximum frequency: 222.767MHz)
+   Maximum combinational path delay:   2.734ns
+   Minimum input required time before clock:   1.945ns
+   Maximum output delay after clock:  10.486ns
+
+
+------------------------------------Footnotes-----------------------------------
+1)  The minimum period statistic assumes all single cycle delays.

@@ -20,7 +20,7 @@ device = "xc3s700an"
 package = "fgg484"
 speed = "4"
 backend = "ise"
-constraints = []
+constraints = ["constraints/s3an-starter.ucf"]
 
 [program]
 mode = "sram"

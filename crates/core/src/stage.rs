@@ -154,9 +154,8 @@ pub async fn execute(
             source,
         })?;
         diagnostics.extend(
-            lines
-                .iter()
-                .filter_map(|l| diag::parse_line(l))
+            diag::parse_lines(&lines)
+                .into_iter()
                 .map(|d| d.resolve(&spec.cwd)),
         );
         hints.extend(hints_for(&lines));

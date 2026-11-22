@@ -1,0 +1,3 @@
+|G22       |rst        |IBUF      |IO_L30N_1/A15         |INPUT    |LVCMOS25*  |1             |          |         |           |IBUF     |         |UNLOCATED |NO         |NONE            |
+|H19       |led        |IOB       |IO_L37N_1             |OUTPUT   |LVCMOS25*  |1             |12        |SLOW     |NONE**     |         |         |UNLOCATED |NO         |NONE            |
+|Y12       |clk        |IBUF      |IO_L18N_2/GCLK15      |INPUT    |LVCMOS25*  |2             |          |         |           |IBUF     |         |UNLOCATED |NO         |NONE            |

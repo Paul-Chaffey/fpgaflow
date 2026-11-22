@@ -276,3 +276,138 @@ pub fn families() -> Result<()> {
     }
     Ok(())
 }
+
+pub fn build(
+    dir: &Path,
+    cfg: &UserConfig,
+    family: Option<&str>,
+    backend: Option<&str>,
+    allow_unconstrained: bool,
+) -> Result<()> {
+    use fpgaflow_pnr::{constraints, ise};
+
+    let project = Project::find(dir)?;
+    let target = fpgaflow_synth::resolve_target(&project, family, backend)?;
+    if target.backend.id != "ise" {
+        return Err(fpgaflow_pnr::PnrError::NotImplemented(target.backend.id.clone()).into());
+    }
+
+    // 1. Pin check before spending any time: every top-level port bit needs a LOC.
+    let yosys =
+        tools::resolve("yosys", cfg).context("yosys is not installed (run `fpgaflow doctor`)")?;
+    let req = AnalyseRequest {
+        files: project.rtl_files()?,
+        include_dirs: project.include_dirs(),
+        defines: project.file.sources.defines.clone(),
+        top: project.file.project.top.clone(),
+        slang: false,
+    };
+    let design = design::analyse(&yosys, &req, &project.stage_dir("analyse")).map_err(|e| {
+        anyhow::anyhow!("elaboration failed: {e} (run `fpgaflow hier` for details)")
+    })?;
+    let top = design.top().context("Yosys found no top module")?.clone();
+    let mut located = std::collections::BTreeSet::new();
+    for f in fpgaflow_pnr::constraint_files(&project) {
+        let text =
+            std::fs::read_to_string(&f).with_context(|| format!("reading {}", f.display()))?;
+        located.extend(constraints::ucf_located_nets(&text));
+    }
+    let missing = constraints::unconstrained(&top.ports, &located);
+    if !missing.is_empty() {
+        let err = fpgaflow_pnr::PnrError::Unconstrained(missing);
+        if !allow_unconstrained {
+            return Err(err.into());
+        }
+        eprintln!("warning: {err}");
+    }
+
+    // 2. Synthesis.
+    eprintln!(
+        "== synthesis: {} -> {}",
+        target.family.name, target.backend.name
+    );
+    let sp = fpgaflow_synth::plan_synth(&project, cfg, target)?;
+    let s = run_plan(&sp.plan)?;
+    report(&project, &s);
+    if !s.ok {
+        bail!(
+            "synthesis failed (log: {})",
+            fpgaflow_sim::rel(&project, &sp.log).display()
+        );
+    }
+
+    // 3. Translate, map, place & route, timing.
+    let ip = ise::plan_implement(&project, cfg, &sp.netlist, &top.name)?;
+    eprintln!("== implementation: {} on {}", top.name, ip.part);
+    let mut s = run_plan(&ip.plan)?;
+    ip.remap(&mut s.diagnostics);
+    report(&project, &s);
+    if !s.ok {
+        bail!("implementation failed");
+    }
+
+    // 4. Pad report check: refuse to make a bitstream with tool-chosen pins.
+    let pads = ise::parse_pad_report(&std::fs::read_to_string(&ip.files.pad)?);
+    let auto: Vec<String> = ise::unlocated(&pads)
+        .iter()
+        .map(|r| format!("{}@{}", r.signal, r.pin))
+        .collect();
+    if !auto.is_empty() && !allow_unconstrained {
+        bail!(
+            "ISE placed these pins itself (UNLOCATED in the pad report): {}; no bitstream written",
+            auto.join(", ")
+        );
+    }
+
+    // 5. Bitstream.
+    let mode = project.file.program.mode;
+    let bp = ise::plan_bitstream(&ip, mode);
+    eprintln!("== bitstream ({mode:?} load)");
+    let s = run_plan(&bp)?;
+    report(&project, &s);
+    if !s.ok {
+        bail!("bitgen failed");
+    }
+
+    // Summary.
+    println!("\nResources ({})", ip.part);
+    for r in ise::parse_map_report(&std::fs::read_to_string(&ip.files.mrp)?) {
+        let pct = if r.available > 0 {
+            100.0 * r.used as f64 / r.available as f64
+        } else {
+            0.0
+        };
+        println!(
+            "  {:<28} {:>7} / {:<7} {pct:>5.1}%",
+            r.name, r.used, r.available
+        );
+    }
+    let t = ise::parse_timing_report(&std::fs::read_to_string(&ip.files.twr)?);
+    println!("\nTiming");
+    match (t.errors, t.fmax_mhz) {
+        (Some(0), Some(f)) => println!(
+            "  all constraints met; Fmax {f:.1} MHz (min period {:.3} ns)",
+            t.min_period_ns.unwrap_or(0.0)
+        ),
+        (Some(e), _) if e > 0 => println!("  {e} TIMING ERROR(S), score {}", t.score.unwrap_or(0)),
+        _ => println!(
+            "  no timing summary found (see {})",
+            fpgaflow_sim::rel(&project, &ip.files.twr).display()
+        ),
+    }
+    println!("\nPins");
+    for r in &pads {
+        println!(
+            "  {:<10} {:<6} {:<8} {:<11} {}",
+            r.signal, r.pin, r.direction, r.io_standard, r.constraint
+        );
+    }
+    println!(
+        "\nbitstream: {}",
+        fpgaflow_sim::rel(&project, &ip.files.bit).display()
+    );
+    if t.errors.is_some_and(|e| e > 0) {
+        bail!("timing not met");
+    }
+    Ok(())
+}
