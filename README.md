@@ -105,6 +105,11 @@ library and verified on an RC10. See `crates/celoxica/src/lib.rs`.
    `data/boards/rc10.ucf`, every pin from the RC10 manual), then
    `fpgaflow build && fpgaflow program`.
 
+Board notes (bank voltages, JTAG pinout, configuration wiring, reserved pins)
+and the decoded USB protocol are in [docs/rc10/](docs/rc10/README.md);
+`scripts/extract-celoxica-pdk.sh --download` fetches Celoxica's PDK 4.1
+(schematic, manuals) into the git-ignored `docs/celoxica/` for local reference.
+
 `fpgaflow build` uses the board's bitgen options (start-up on CCLK, which the
 FX2 drives). Loads go into the FPGA only (volatile); `fpgaflow-celoxica`
 never touches the board's flash or FX2 firmware. The reset button next to the
