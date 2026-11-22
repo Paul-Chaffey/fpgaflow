@@ -72,7 +72,24 @@ pub enum Outcome {
     Build(BuildOutput),
 }
 
+/// What the Claude tab asked for, before ports are looked up.
+#[derive(Debug, Clone)]
+pub enum AiRequest {
+    NewModule { description: String },
+    Testbench { module: String, description: String },
+    Constraints { description: String },
+    FixErrors { diagnostics: Vec<String> },
+    Explain { file: PathBuf, question: String },
+}
+
+pub struct AiResult {
+    pub outcome: fpgaflow_flow::ai::Outcome,
+    pub proposals: Vec<fpgaflow_flow::Proposal>,
+}
+
 pub enum Msg {
+    Ai(fpgaflow_flow::ai::AiEvent),
+    AiDone(Result<AiResult, String>),
     Event(JobEvent),
     Done(Action, Result<Outcome, String>),
     Hotplug(Hotplug),
@@ -195,4 +212,63 @@ pub fn watch_project(
     })?;
     w.watch(root, notify::RecursiveMode::Recursive)?;
     Ok(w)
+}
+
+/// Ask Claude in the background; progress arrives as `Msg::Ai`, the
+/// checked result as `Msg::AiDone`.
+pub fn spawn_ai(
+    rt: &tokio::runtime::Runtime,
+    repaint: egui::Context,
+    tx: Sender<Msg>,
+    project: Project,
+    cfg: UserConfig,
+    req: AiRequest,
+    cancel: CancellationToken,
+) {
+    use fpgaflow_flow::ai::Task;
+    rt.spawn(async move {
+        let (etx, mut erx) = tokio::sync::mpsc::unbounded_channel();
+        let (fwd_tx, fwd_repaint) = (tx.clone(), repaint.clone());
+        let forward = tokio::spawn(async move {
+            while let Some(ev) = erx.recv().await {
+                if fwd_tx.send(Msg::Ai(ev)).is_err() {
+                    break;
+                }
+                fwd_repaint.request_repaint();
+            }
+        });
+        // `async move` owns the event sender, so it closes (and `forward`
+        // finishes) as soon as the request is done.
+        let result: anyhow::Result<AiResult> = async move {
+            // Port lists come from Yosys (a blocking subprocess).
+            let (p2, c2) = (project.clone(), cfg.clone());
+            let task = tokio::task::spawn_blocking(move || -> anyhow::Result<Task> {
+                Ok(match req {
+                    AiRequest::NewModule { description } => Task::NewModule { description },
+                    AiRequest::Testbench {
+                        module,
+                        description,
+                    } => Task::Testbench {
+                        ports: fpgaflow_flow::ports_text(&p2, &c2, Some(&module))?,
+                        module,
+                        description,
+                    },
+                    AiRequest::Constraints { description } => Task::Constraints {
+                        ports: fpgaflow_flow::ports_text(&p2, &c2, None)?,
+                        description,
+                    },
+                    AiRequest::FixErrors { diagnostics } => Task::FixErrors { diagnostics },
+                    AiRequest::Explain { file, question } => Task::Explain { file, question },
+                })
+            })
+            .await??;
+            let outcome = fpgaflow_flow::ai_generate(&project, &cfg, &task, &etx, &cancel).await?;
+            let proposals = fpgaflow_flow::proposals(&project, &outcome.generated)?;
+            Ok(AiResult { outcome, proposals })
+        }
+        .await;
+        let _ = forward.await;
+        let _ = tx.send(Msg::AiDone(result.map_err(|e| format!("{e:#}"))));
+        repaint.request_repaint();
+    });
 }

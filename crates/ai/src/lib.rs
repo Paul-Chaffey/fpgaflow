@@ -189,6 +189,8 @@ Conventions:
 - Avoid races in testbenches: change stimulus away from the active clock edge (e.g. #1 after @(posedge clk)).
 - Physical constraints are UCF files for Xilinx ISE in constraints/. Never invent pin locations: use only pins that appear in the board's master UCF given to you, keeping its IOSTANDARD/PULLDOWN/SLEW/DRIVE settings, and rename nets to the design's top-level port names.
 
+How your answer is checked: you cannot write files or run tools yourself, and should not try. After you answer, fpgaflow compiles every HDL file you return with Icarus alongside the project's sources, runs any testbench you return (it must finish and print the PASS line), and checks that a UCF uses only master-UCF pins. If a check fails, you get the errors and your previous files back to correct. So don't tell the engineer the code is untested; say what deserves a closer look.
+
 Answer only with the JSON object the schema describes: complete file contents (never diffs or placeholders) and a short summary that tells the engineer what to check."#;
 
 pub fn system_prompt() -> &'static str {

@@ -24,6 +24,7 @@ const MAX_LOG_LINES: usize = 50_000;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Log,
+    Claude,
     Problems,
     Reports,
     Boards,
@@ -53,6 +54,38 @@ enum LineKind {
 struct Running {
     action: Action,
     cancel: CancellationToken,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum AiKind {
+    #[default]
+    NewModule,
+    Testbench,
+    Constraints,
+    Explain,
+}
+
+struct AiView {
+    summary: String,
+    checked_ok: bool,
+    report: String,
+    rounds: u32,
+    proposals: Vec<(fpgaflow_flow::Proposal, bool)>,
+}
+
+#[derive(Default)]
+struct AiPanel {
+    kind: AiKind,
+    description: String,
+    module: String,
+    explain_file: String,
+    question: String,
+    running: Option<CancellationToken>,
+    status: Vec<String>,
+    thinking: String,
+    answer_chars: usize,
+    result: Option<AiView>,
+    error: Option<String>,
 }
 
 #[derive(Default)]
@@ -92,6 +125,7 @@ pub struct App {
 
     doctor: Option<(Vec<ToolStatus>, Vec<HostCheck>)>,
     new_project: NewProjectForm,
+    ai: AiPanel,
 }
 
 impl App {
@@ -128,6 +162,7 @@ impl App {
             _fs_watch: None,
             doctor: None,
             new_project: NewProjectForm::default(),
+            ai: AiPanel::default(),
         };
         match worker::start_hotplug(app.repaint.clone(), app.tx.clone()) {
             Ok((present, w)) => {
@@ -265,6 +300,38 @@ impl App {
                 self.usb.retain(|(x, _)| x.syspath != d.syspath);
             }
             Msg::Doctor(t, h) => self.doctor = Some((t, h)),
+            Msg::Ai(ev) => {
+                use fpgaflow_flow::ai::AiEvent;
+                match ev {
+                    AiEvent::Status(t) => self.ai.status.push(t),
+                    AiEvent::Thinking(t) => self.ai.thinking.push_str(&t),
+                    AiEvent::Text(t) => self.ai.answer_chars += t.len(),
+                    AiEvent::Checked { round, ok, report } => self.ai.status.push(if ok {
+                        format!("round {round} check: passed")
+                    } else {
+                        format!("round {round} check: failed, sending the errors back\n{report}")
+                    }),
+                }
+            }
+            Msg::AiDone(r) => {
+                self.ai.running = None;
+                match r {
+                    Ok(res) => {
+                        self.ai.result = Some(AiView {
+                            summary: res.outcome.generated.summary,
+                            checked_ok: res.outcome.checked_ok,
+                            report: res.outcome.report,
+                            rounds: res.outcome.rounds,
+                            proposals: res.proposals.into_iter().map(|p| (p, true)).collect(),
+                        });
+                        self.note("Claude: answer ready for review (Claude tab)");
+                    }
+                    Err(e) => {
+                        self.ai.error = Some(e.clone());
+                        self.message = Some((false, format!("Claude: {e}")));
+                    }
+                }
+            }
             Msg::FsChanged(paths) => self.on_fs_change(paths),
         }
     }
@@ -633,6 +700,14 @@ impl App {
                 .count();
             for (tab, label) in [
                 (Tab::Log, "Log".to_string()),
+                (
+                    Tab::Claude,
+                    if self.ai.running.is_some() {
+                        "Claude …".to_string()
+                    } else {
+                        "Claude".to_string()
+                    },
+                ),
                 (Tab::Problems, format!("Problems ({errors}E/{warns}W)")),
                 (Tab::Reports, "Reports".to_string()),
                 (
@@ -654,6 +729,7 @@ impl App {
         ui.separator();
         match self.tab {
             Tab::Log => self.log_view(ui),
+            Tab::Claude => self.ai_view(ui),
             Tab::Problems => self.problems_view(ui),
             Tab::Reports => self.reports_view(ui),
             Tab::Boards => self.boards_view(ui),
@@ -694,6 +770,29 @@ impl App {
             .as_ref()
             .map(|p| p.root.clone())
             .unwrap_or_default();
+        let fixable = self
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Error);
+        if ui
+            .add_enabled(
+                fixable && self.ai.running.is_none(),
+                egui::Button::new("✨ Ask Claude to fix these errors"),
+            )
+            .clicked()
+        {
+            let diagnostics = self
+                .diagnostics
+                .iter()
+                .filter(|d| d.severity != Severity::Note)
+                .map(|d| {
+                    let mut d = d.clone();
+                    d.file = d.file.strip_prefix(&root).unwrap_or(&d.file).to_path_buf();
+                    d.to_string()
+                })
+                .collect();
+            self.start_ai(worker::AiRequest::FixErrors { diagnostics });
+        }
         let mut open = None;
         egui::ScrollArea::vertical()
             .auto_shrink(false)
@@ -981,8 +1080,292 @@ impl App {
                 }
             }
         });
+        ui.add_space(12.0);
+        ui.heading("Claude");
+        use fpgaflow_core::AiBackend;
+        egui::Grid::new("ai_settings")
+            .num_columns(2)
+            .show(ui, |ui| {
+                ui.label("Backend");
+                egui::ComboBox::from_id_salt("ai_backend")
+                    .selected_text(match self.cfg.ai.backend {
+                        AiBackend::ClaudeCode => "Claude Code CLI (your login)",
+                        AiBackend::Api => "Anthropic API (API key)",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut self.cfg.ai.backend,
+                            AiBackend::ClaudeCode,
+                            "Claude Code CLI (your login)",
+                        );
+                        ui.selectable_value(
+                            &mut self.cfg.ai.backend,
+                            AiBackend::Api,
+                            "Anthropic API (API key)",
+                        );
+                    });
+                ui.end_row();
+                ui.label("Model");
+                ui.text_edit_singleline(&mut self.cfg.ai.model);
+                ui.end_row();
+                ui.label("Effort");
+                egui::ComboBox::from_id_salt("ai_effort")
+                    .selected_text(self.cfg.ai.effort.clone())
+                    .show_ui(ui, |ui| {
+                        for e in ["low", "medium", "high", "xhigh", "max"] {
+                            ui.selectable_value(&mut self.cfg.ai.effort, e.to_string(), e);
+                        }
+                    });
+                ui.end_row();
+                ui.label("Fix-up rounds");
+                ui.add(egui::DragValue::new(&mut self.cfg.ai.max_fix_rounds).range(0..=6));
+                ui.end_row();
+            });
+        if self.cfg.ai.backend == AiBackend::Api {
+            ui.small("API key: ANTHROPIC_API_KEY, or [ai] api_key_command in config.toml (e.g. a KWallet lookup).");
+        }
+        ui.small("Press \"Save settings\" above to keep these.");
         ui.add_space(8.0);
         ui.small("Tool search paths and per-tool overrides are in config.toml.");
+    }
+
+    fn start_ai(&mut self, req: worker::AiRequest) {
+        let Some(project) = self.project.clone() else {
+            return;
+        };
+        if self.ai.running.is_some() {
+            return;
+        }
+        let cancel = CancellationToken::new();
+        self.ai.status.clear();
+        self.ai.thinking.clear();
+        self.ai.answer_chars = 0;
+        self.ai.result = None;
+        self.ai.error = None;
+        self.tab = Tab::Claude;
+        worker::spawn_ai(
+            &self.rt,
+            self.repaint.clone(),
+            self.tx.clone(),
+            project,
+            self.cfg.clone(),
+            req,
+            cancel.clone(),
+        );
+        self.ai.running = Some(cancel);
+    }
+
+    fn rtl_modules(&self) -> Vec<String> {
+        let Some(p) = &self.project else {
+            return Vec::new();
+        };
+        p.rtl_files()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|f| std::fs::read_to_string(f).ok())
+            .flat_map(|t| fpgaflow_hdl::scan::declared_modules(&t))
+            .collect()
+    }
+
+    fn ai_view(&mut self, ui: &mut egui::Ui) {
+        use fpgaflow_core::AiBackend;
+        if self.project.is_none() {
+            ui.label("Open a project first.");
+            return;
+        }
+        let (route, cost) = match self.cfg.ai.backend {
+            AiBackend::ClaudeCode => ("Claude Code", "your Claude plan"),
+            AiBackend::Api => ("the Anthropic API", "API credits"),
+        };
+        ui.label(format!(
+            "{} via {route}: each request uses {cost}",
+            self.cfg.ai.model
+        ));
+        let busy = self.ai.running.is_some();
+        ui.add_enabled_ui(!busy, |ui| {
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.ai.kind, AiKind::NewModule, "New module");
+                ui.selectable_value(&mut self.ai.kind, AiKind::Testbench, "Testbench");
+                ui.selectable_value(&mut self.ai.kind, AiKind::Constraints, "Constraints");
+                ui.selectable_value(&mut self.ai.kind, AiKind::Explain, "Explain");
+            });
+            match self.ai.kind {
+                AiKind::NewModule => {
+                    ui.label("Describe the module (behaviour, ports, parameters, clocking):");
+                }
+                AiKind::Testbench => {
+                    let mods = self.rtl_modules();
+                    if self.ai.module.is_empty() {
+                        if let Some(m) = mods.first() {
+                            self.ai.module = m.clone();
+                        }
+                    }
+                    ui.horizontal(|ui| {
+                        ui.label("Module");
+                        egui::ComboBox::from_id_salt("ai_module")
+                            .selected_text(self.ai.module.clone())
+                            .show_ui(ui, |ui| {
+                                for m in mods {
+                                    ui.selectable_value(&mut self.ai.module, m.clone(), m);
+                                }
+                            });
+                    });
+                    ui.label("What to test (optional):");
+                }
+                AiKind::Constraints => {
+                    ui.label("What each top-level port connects to on the board (pins come only from the board's master UCF):");
+                }
+                AiKind::Explain => {
+                    ui.horizontal(|ui| {
+                        ui.label("File (relative to the project)");
+                        ui.text_edit_singleline(&mut self.ai.explain_file);
+                    });
+                    ui.label("Question:");
+                }
+            }
+            let text = if self.ai.kind == AiKind::Explain { &mut self.ai.question } else { &mut self.ai.description };
+            ui.add(egui::TextEdit::multiline(text).desired_rows(4).desired_width(f32::INFINITY));
+        });
+        ui.horizontal(|ui| {
+            let ready = match self.ai.kind {
+                AiKind::NewModule | AiKind::Constraints => !self.ai.description.trim().is_empty(),
+                AiKind::Testbench => !self.ai.module.is_empty(),
+                AiKind::Explain => !self.ai.explain_file.trim().is_empty(),
+            };
+            if ui
+                .add_enabled(!busy && ready, egui::Button::new("✨ Ask Claude"))
+                .clicked()
+            {
+                let req = match self.ai.kind {
+                    AiKind::NewModule => worker::AiRequest::NewModule {
+                        description: self.ai.description.clone(),
+                    },
+                    AiKind::Testbench => worker::AiRequest::Testbench {
+                        module: self.ai.module.clone(),
+                        description: self.ai.description.clone(),
+                    },
+                    AiKind::Constraints => worker::AiRequest::Constraints {
+                        description: self.ai.description.clone(),
+                    },
+                    AiKind::Explain => worker::AiRequest::Explain {
+                        file: self
+                            .project
+                            .as_ref()
+                            .map(|p| p.root.join(self.ai.explain_file.trim()))
+                            .unwrap_or_default(),
+                        question: if self.ai.question.trim().is_empty() {
+                            "What does it do, and is anything wrong?".into()
+                        } else {
+                            self.ai.question.clone()
+                        },
+                    },
+                };
+                self.start_ai(req);
+            }
+            if let Some(c) = &self.ai.running {
+                ui.spinner();
+                ui.label(format!(
+                    "working… ({} chars of answer so far)",
+                    self.ai.answer_chars
+                ));
+                if ui.button("⏹ Cancel").clicked() {
+                    c.cancel();
+                }
+            }
+        });
+        ui.separator();
+        let mut apply_now = false;
+        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+            for s in &self.ai.status {
+                ui.colored_label(Color32::from_rgb(110, 160, 230), s);
+            }
+            if !self.ai.thinking.is_empty() {
+                egui::CollapsingHeader::new("Reasoning (summary)").default_open(busy).show(ui, |ui| {
+                    ui.label(RichText::new(&self.ai.thinking).italics());
+                });
+            }
+            if let Some(e) = &self.ai.error {
+                ui.colored_label(Color32::from_rgb(220, 80, 70), e);
+            }
+            if let Some(r) = &mut self.ai.result {
+                ui.add_space(6.0);
+                ui.label(&r.summary);
+                if !r.proposals.is_empty() {
+                    ui.add_space(6.0);
+                    if r.checked_ok {
+                        ui.colored_label(
+                            Color32::from_rgb(60, 170, 90),
+                            format!("✔ checks passed (round {}): compiles, testbenches pass, pins from the master UCF", r.rounds),
+                        );
+                    } else {
+                        ui.colored_label(
+                            Color32::from_rgb(220, 80, 70),
+                            format!("✖ still failing checks after {} round(s): review carefully", r.rounds),
+                        );
+                        ui.monospace(&r.report);
+                    }
+                    for (p, keep) in &mut r.proposals {
+                        ui.horizontal(|ui| {
+                            ui.checkbox(keep, "");
+                            ui.label(RichText::new(&p.file.path).monospace().strong());
+                            ui.small(if p.existed { "changed" } else { "new" });
+                            ui.small(&p.file.purpose);
+                        });
+                        egui::CollapsingHeader::new(format!("diff {}", p.file.path)).id_salt(&p.file.path).show(ui, |ui| {
+                            for line in p.diff.lines() {
+                                let c = if line.starts_with('+') && !line.starts_with("+++") {
+                                    Color32::from_rgb(90, 180, 100)
+                                } else if line.starts_with('-') && !line.starts_with("---") {
+                                    Color32::from_rgb(220, 100, 90)
+                                } else if line.starts_with("@@") {
+                                    Color32::from_rgb(110, 160, 230)
+                                } else {
+                                    ui.visuals().text_color()
+                                };
+                                ui.label(RichText::new(line).monospace().color(c));
+                            }
+                        });
+                    }
+                    apply_now = ui.button("Apply selected files to the project").clicked();
+                }
+            }
+        });
+        if apply_now {
+            self.apply_ai();
+        }
+    }
+
+    fn apply_ai(&mut self) {
+        let (Some(project), Some(r)) = (self.project.clone(), &self.ai.result) else {
+            return;
+        };
+        let chosen: Vec<&fpgaflow_flow::Proposal> = r
+            .proposals
+            .iter()
+            .filter(|(_, k)| *k)
+            .map(|(p, _)| p)
+            .collect();
+        match fpgaflow_flow::apply(&project, &chosen) {
+            Ok(written) => {
+                for w in &written {
+                    let rel = w
+                        .strip_prefix(&project.root)
+                        .unwrap_or(w)
+                        .display()
+                        .to_string();
+                    self.note(format!("Claude: wrote {rel}"));
+                }
+                self.message = Some((true, format!("wrote {} file(s)", written.len())));
+                if let Ok(p) = Project::load(&project.root) {
+                    self.project = Some(p);
+                }
+                for w in written {
+                    self.open_in_editor(&w, None);
+                }
+                self.ai.result = None;
+            }
+            Err(e) => self.message = Some((false, format!("apply: {e:#}"))),
+        }
     }
 
     fn new_project_window(&mut self, ctx: &egui::Context) {
