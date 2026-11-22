@@ -4,10 +4,33 @@
 # MSB first ("pins should be listed in MSBit to LSBit order"), and are
 # numbered that way here.
 #
-# The manual gives no I/O standards. LVCMOS33 is an inference from the
-# expansion header note ("can only accept signals up to 3.3v"); check the
-# bank VCCO on the schematic (PDK Documentation\PSL\RC10\Schematic\rc10.pdf)
-# before relying on it for anything but LEDs, buttons and the clock.
+# Checked against the RC10 schematic (PDK 4.1 RC10.pdf, sheet 3 "FPGA" and
+# sheet 5 "LEDs Joystick", rev A, 2005) and Celoxica's own pin lists in the
+# PSL library rc10.hcl: every LOC below matches both. (The schematic warns
+# that three camera net names are wrong; the library agrees with the manual.)
+#
+# I/O standards follow each bank's VCCO on the schematic:
+#   bank 0  VccADC: +1.2 V through L5, or +2.5/+3.3 V via 0R links R41/R43
+#           (VGA colour pins; LVCMOS33 below until the fitted option is known)
+#   bank 1,2  ATAv, set by jumper JP2: 1-2 = +3.3 V, 2-3 = +2.5 V
+#           (expansion header, expansion clocks, joystick, LCD; LVCMOS33 assumes 1-2)
+#   bank 3  +2.5 V  (camera, ADC control)       -> LVCMOS25
+#   bank 4,5  +3.3 V  (48 MHz clock, PS/2, FX2, RS-232, audio, VGA sync, CAN,
+#           servos)                              -> LVCMOS33
+#   bank 6,7  +2.5 V  (ADC data, LEDs, 7-segment) -> LVCMOS25
+#
+# NEVER USE these pins: they are wired straight to a supply on the board, so
+# driving them low shorts the rail.
+#   A8 C8 D8 E8 F8            VCCO_0 (VccADC)
+#   J13                       ATAv
+#   E4 F5 G1 J5 J6 K5 K6 M18  +2.5 V
+#
+# Configuration: the FX2 loads the FPGA in slave SelectMAP (M2 M1 M0 = 1 1 0);
+# CCLK (T15) runs from the 48 MHz clock, PROG_B (E5) and DONE (R15) go to FX2
+# port pins P0 and P4. The SelectMAP data pins D0-D7 (T12 R12 N11 P11 U9 V9 R7
+# T7) also reach the FX2 ("readback" bus in Celoxica's library).
+# JTAG connector CN3 (0.1", 9 pins, FPGA alone on the chain; JTAG is 2.5 V):
+#   1 TMS  2 key (cut)  3 TDI  4 TDO  5 n/c  6 TCK  7 +3.3 V  8 GND  9 +2.5 V (VREF)
 #
 # This is a master file: copy the lines you need into your project and rename
 # the nets to your top-level port names (or name your ports to match).
@@ -18,40 +41,40 @@ NET "CLK_48MHZ" PERIOD = 20.833ns HIGH 50%;
 NET "EXP_CLK0"  LOC = "E10" | IOSTANDARD = LVCMOS33 ;   # expansion header pin 47
 NET "EXP_CLK1"  LOC = "F10" | IOSTANDARD = LVCMOS33 ;   # expansion header pin 49
 
-# ---- LEDs (3.4). LED0 is the rightmost. D13 (DONE) and D14 (power) are not FPGA I/O.
-NET "LED<0>" LOC = "D2" | IOSTANDARD = LVCMOS33 | SLEW = SLOW | DRIVE = 8 ;
-NET "LED<1>" LOC = "D3" | IOSTANDARD = LVCMOS33 | SLEW = SLOW | DRIVE = 8 ;
-NET "LED<2>" LOC = "E1" | IOSTANDARD = LVCMOS33 | SLEW = SLOW | DRIVE = 8 ;
-NET "LED<3>" LOC = "E2" | IOSTANDARD = LVCMOS33 | SLEW = SLOW | DRIVE = 8 ;
-NET "LED<4>" LOC = "E3" | IOSTANDARD = LVCMOS33 | SLEW = SLOW | DRIVE = 8 ;
-NET "LED<5>" LOC = "F2" | IOSTANDARD = LVCMOS33 | SLEW = SLOW | DRIVE = 8 ;
-NET "LED<6>" LOC = "F4" | IOSTANDARD = LVCMOS33 | SLEW = SLOW | DRIVE = 8 ;
-NET "LED<7>" LOC = "G3" | IOSTANDARD = LVCMOS33 | SLEW = SLOW | DRIVE = 8 ;
+# ---- LEDs (3.4), active high through 150R. LED0 is the rightmost. D13 (DONE) and D14 (power) are not FPGA I/O.
+NET "LED<0>" LOC = "D2" | IOSTANDARD = LVCMOS25 | SLEW = SLOW | DRIVE = 8 ;
+NET "LED<1>" LOC = "D3" | IOSTANDARD = LVCMOS25 | SLEW = SLOW | DRIVE = 8 ;
+NET "LED<2>" LOC = "E1" | IOSTANDARD = LVCMOS25 | SLEW = SLOW | DRIVE = 8 ;
+NET "LED<3>" LOC = "E2" | IOSTANDARD = LVCMOS25 | SLEW = SLOW | DRIVE = 8 ;
+NET "LED<4>" LOC = "E3" | IOSTANDARD = LVCMOS25 | SLEW = SLOW | DRIVE = 8 ;
+NET "LED<5>" LOC = "F2" | IOSTANDARD = LVCMOS25 | SLEW = SLOW | DRIVE = 8 ;
+NET "LED<6>" LOC = "F4" | IOSTANDARD = LVCMOS25 | SLEW = SLOW | DRIVE = 8 ;
+NET "LED<7>" LOC = "G3" | IOSTANDARD = LVCMOS25 | SLEW = SLOW | DRIVE = 8 ;
 
-# ---- Seven-segment displays (3.5)
-NET "SEG0_A"  LOC = "H2" | IOSTANDARD = LVCMOS33 ;
-NET "SEG0_B"  LOC = "H3" | IOSTANDARD = LVCMOS33 ;
-NET "SEG0_C"  LOC = "H6" | IOSTANDARD = LVCMOS33 ;
-NET "SEG0_D"  LOC = "H5" | IOSTANDARD = LVCMOS33 ;
-NET "SEG0_E"  LOC = "G5" | IOSTANDARD = LVCMOS33 ;
-NET "SEG0_F"  LOC = "G4" | IOSTANDARD = LVCMOS33 ;
-NET "SEG0_G"  LOC = "H1" | IOSTANDARD = LVCMOS33 ;
-NET "SEG0_DP" LOC = "C2" | IOSTANDARD = LVCMOS33 ;
-NET "SEG1_A"  LOC = "J1" | IOSTANDARD = LVCMOS33 ;
-NET "SEG1_B"  LOC = "J2" | IOSTANDARD = LVCMOS33 ;
-NET "SEG1_C"  LOC = "K2" | IOSTANDARD = LVCMOS33 ;
-NET "SEG1_D"  LOC = "C3" | IOSTANDARD = LVCMOS33 ;
-NET "SEG1_E"  LOC = "C1" | IOSTANDARD = LVCMOS33 ;
-NET "SEG1_F"  LOC = "H4" | IOSTANDARD = LVCMOS33 ;
-NET "SEG1_G"  LOC = "B1" | IOSTANDARD = LVCMOS33 ;
-NET "SEG1_DP" LOC = "J4" | IOSTANDARD = LVCMOS33 ;
+# ---- Seven-segment displays (3.5): D4, common cathode, segments active high
+NET "SEG0_A"  LOC = "H2" | IOSTANDARD = LVCMOS25 ;
+NET "SEG0_B"  LOC = "H3" | IOSTANDARD = LVCMOS25 ;
+NET "SEG0_C"  LOC = "H6" | IOSTANDARD = LVCMOS25 ;
+NET "SEG0_D"  LOC = "H5" | IOSTANDARD = LVCMOS25 ;
+NET "SEG0_E"  LOC = "G5" | IOSTANDARD = LVCMOS25 ;
+NET "SEG0_F"  LOC = "G4" | IOSTANDARD = LVCMOS25 ;
+NET "SEG0_G"  LOC = "H1" | IOSTANDARD = LVCMOS25 ;
+NET "SEG0_DP" LOC = "C2" | IOSTANDARD = LVCMOS25 ;
+NET "SEG1_A"  LOC = "J1" | IOSTANDARD = LVCMOS25 ;
+NET "SEG1_B"  LOC = "J2" | IOSTANDARD = LVCMOS25 ;
+NET "SEG1_C"  LOC = "K2" | IOSTANDARD = LVCMOS25 ;
+NET "SEG1_D"  LOC = "C3" | IOSTANDARD = LVCMOS25 ;
+NET "SEG1_E"  LOC = "C1" | IOSTANDARD = LVCMOS25 ;
+NET "SEG1_F"  LOC = "H4" | IOSTANDARD = LVCMOS25 ;
+NET "SEG1_G"  LOC = "B1" | IOSTANDARD = LVCMOS25 ;
+NET "SEG1_DP" LOC = "J4" | IOSTANDARD = LVCMOS25 ;
 
-# ---- Joystick (3.6). Pressed = logic 1.
-NET "JOY_LEFT"   LOC = "A10" | IOSTANDARD = LVCMOS33 | PULLDOWN ;
-NET "JOY_RIGHT"  LOC = "D10" | IOSTANDARD = LVCMOS33 | PULLDOWN ;
-NET "JOY_UP"     LOC = "B13" | IOSTANDARD = LVCMOS33 | PULLDOWN ;
-NET "JOY_DOWN"   LOC = "A11" | IOSTANDARD = LVCMOS33 | PULLDOWN ;
-NET "JOY_SELECT" LOC = "B10" | IOSTANDARD = LVCMOS33 | PULLDOWN ;
+# ---- Joystick (3.6). Pressed = logic 1 (switch to ATAv); external 11k pull-downs R125-R129.
+NET "JOY_LEFT"   LOC = "A10" | IOSTANDARD = LVCMOS33 ;
+NET "JOY_RIGHT"  LOC = "D10" | IOSTANDARD = LVCMOS33 ;
+NET "JOY_UP"     LOC = "B13" | IOSTANDARD = LVCMOS33 ;
+NET "JOY_DOWN"   LOC = "A11" | IOSTANDARD = LVCMOS33 ;
+NET "JOY_SELECT" LOC = "B10" | IOSTANDARD = LVCMOS33 ;
 
 # ---- PS/2 (3.7)
 NET "PS2_MOUSE_DATA" LOC = "R10" | IOSTANDARD = LVCMOS33 ;
@@ -66,37 +89,37 @@ NET "UART_RTS" LOC = "R5" | IOSTANDARD = LVCMOS33 ;
 NET "UART_TXD" LOC = "U5" | IOSTANDARD = LVCMOS33 ;
 
 # ---- ADCs, ADC10065 (3.9). ADC_NSHDN must be driven high to power them.
-NET "ADC0_D<9>" LOC = "K1" | IOSTANDARD = LVCMOS33 ;
-NET "ADC0_D<8>" LOC = "L4" | IOSTANDARD = LVCMOS33 ;
-NET "ADC0_D<7>" LOC = "L3" | IOSTANDARD = LVCMOS33 ;
-NET "ADC0_D<6>" LOC = "L2" | IOSTANDARD = LVCMOS33 ;
-NET "ADC0_D<5>" LOC = "L1" | IOSTANDARD = LVCMOS33 ;
-NET "ADC0_D<4>" LOC = "M4" | IOSTANDARD = LVCMOS33 ;
-NET "ADC0_D<3>" LOC = "M3" | IOSTANDARD = LVCMOS33 ;
-NET "ADC0_D<2>" LOC = "N4" | IOSTANDARD = LVCMOS33 ;
-NET "ADC0_D<1>" LOC = "N2" | IOSTANDARD = LVCMOS33 ;
-NET "ADC0_D<0>" LOC = "P4" | IOSTANDARD = LVCMOS33 ;
-NET "ADC0_TRIG"    LOC = "N5"  | IOSTANDARD = LVCMOS33 ;
-NET "ADC0_OFFSET"  LOC = "U18" | IOSTANDARD = LVCMOS33 ;   # DC offset PWM
-NET "ADC0_STANDBY" LOC = "T18" | IOSTANDARD = LVCMOS33 ;
-NET "ADC0_IRS"     LOC = "L6"  | IOSTANDARD = LVCMOS33 ;
-NET "ADC0_CLK"     LOC = "M5"  | IOSTANDARD = LVCMOS33 ;
-NET "ADC1_D<9>" LOC = "U1" | IOSTANDARD = LVCMOS33 ;
-NET "ADC1_D<8>" LOC = "T1" | IOSTANDARD = LVCMOS33 ;
-NET "ADC1_D<7>" LOC = "T2" | IOSTANDARD = LVCMOS33 ;
-NET "ADC1_D<6>" LOC = "T3" | IOSTANDARD = LVCMOS33 ;
-NET "ADC1_D<5>" LOC = "R1" | IOSTANDARD = LVCMOS33 ;
-NET "ADC1_D<4>" LOC = "R2" | IOSTANDARD = LVCMOS33 ;
-NET "ADC1_D<3>" LOC = "R3" | IOSTANDARD = LVCMOS33 ;
-NET "ADC1_D<2>" LOC = "P1" | IOSTANDARD = LVCMOS33 ;
-NET "ADC1_D<1>" LOC = "P2" | IOSTANDARD = LVCMOS33 ;
-NET "ADC1_D<0>" LOC = "P3" | IOSTANDARD = LVCMOS33 ;
-NET "ADC1_TRIG"    LOC = "M1"  | IOSTANDARD = LVCMOS33 ;
-NET "ADC1_OFFSET"  LOC = "P16" | IOSTANDARD = LVCMOS33 ;
-NET "ADC1_STANDBY" LOC = "R16" | IOSTANDARD = LVCMOS33 ;
-NET "ADC1_IRS"     LOC = "K4"  | IOSTANDARD = LVCMOS33 ;
-NET "ADC1_CLK"     LOC = "L5"  | IOSTANDARD = LVCMOS33 ;
-NET "ADC_NSHDN"    LOC = "R17" | IOSTANDARD = LVCMOS33 ;
+NET "ADC0_D<9>" LOC = "K1" | IOSTANDARD = LVCMOS25 ;
+NET "ADC0_D<8>" LOC = "L4" | IOSTANDARD = LVCMOS25 ;
+NET "ADC0_D<7>" LOC = "L3" | IOSTANDARD = LVCMOS25 ;
+NET "ADC0_D<6>" LOC = "L2" | IOSTANDARD = LVCMOS25 ;
+NET "ADC0_D<5>" LOC = "L1" | IOSTANDARD = LVCMOS25 ;
+NET "ADC0_D<4>" LOC = "M4" | IOSTANDARD = LVCMOS25 ;
+NET "ADC0_D<3>" LOC = "M3" | IOSTANDARD = LVCMOS25 ;
+NET "ADC0_D<2>" LOC = "N4" | IOSTANDARD = LVCMOS25 ;
+NET "ADC0_D<1>" LOC = "N2" | IOSTANDARD = LVCMOS25 ;
+NET "ADC0_D<0>" LOC = "P4" | IOSTANDARD = LVCMOS25 ;
+NET "ADC0_TRIG"    LOC = "N5"  | IOSTANDARD = LVCMOS25 ;
+NET "ADC0_OFFSET"  LOC = "U18" | IOSTANDARD = LVCMOS25 ;   # DC offset PWM
+NET "ADC0_STANDBY" LOC = "T18" | IOSTANDARD = LVCMOS25 ;
+NET "ADC0_IRS"     LOC = "L6"  | IOSTANDARD = LVCMOS25 ;
+NET "ADC0_CLK"     LOC = "M5"  | IOSTANDARD = LVCMOS25 ;
+NET "ADC1_D<9>" LOC = "U1" | IOSTANDARD = LVCMOS25 ;
+NET "ADC1_D<8>" LOC = "T1" | IOSTANDARD = LVCMOS25 ;
+NET "ADC1_D<7>" LOC = "T2" | IOSTANDARD = LVCMOS25 ;
+NET "ADC1_D<6>" LOC = "T3" | IOSTANDARD = LVCMOS25 ;
+NET "ADC1_D<5>" LOC = "R1" | IOSTANDARD = LVCMOS25 ;
+NET "ADC1_D<4>" LOC = "R2" | IOSTANDARD = LVCMOS25 ;
+NET "ADC1_D<3>" LOC = "R3" | IOSTANDARD = LVCMOS25 ;
+NET "ADC1_D<2>" LOC = "P1" | IOSTANDARD = LVCMOS25 ;
+NET "ADC1_D<1>" LOC = "P2" | IOSTANDARD = LVCMOS25 ;
+NET "ADC1_D<0>" LOC = "P3" | IOSTANDARD = LVCMOS25 ;
+NET "ADC1_TRIG"    LOC = "M1"  | IOSTANDARD = LVCMOS25 ;
+NET "ADC1_OFFSET"  LOC = "P16" | IOSTANDARD = LVCMOS25 ;
+NET "ADC1_STANDBY" LOC = "R16" | IOSTANDARD = LVCMOS25 ;
+NET "ADC1_IRS"     LOC = "K4"  | IOSTANDARD = LVCMOS25 ;
+NET "ADC1_CLK"     LOC = "L5"  | IOSTANDARD = LVCMOS25 ;
+NET "ADC_NSHDN"    LOC = "R17" | IOSTANDARD = LVCMOS25 ;
 
 # ---- VGA (3.10), 7 bits per colour
 NET "VGA_R<6>" LOC = "D5" | IOSTANDARD = LVCMOS33 ;
@@ -137,24 +160,24 @@ NET "LCD_D<0>" LOC = "H15" | IOSTANDARD = LVCMOS33 ;
 NET "LCD_EN"   LOC = "J18" | IOSTANDARD = LVCMOS33 ;
 
 # ---- Camera connector, OmniVision OV9650 (3.11)
-NET "CAM_RESET"  LOC = "P18" | IOSTANDARD = LVCMOS33 ;
-NET "CAM_PWDN"   LOC = "R18" | IOSTANDARD = LVCMOS33 ;
-NET "CAM_SIO_D"  LOC = "K14" | IOSTANDARD = LVCMOS33 ;
-NET "CAM_SIO_C"  LOC = "K13" | IOSTANDARD = LVCMOS33 ;
-NET "CAM_VSYNC"  LOC = "K15" | IOSTANDARD = LVCMOS33 ;
-NET "CAM_HREF"   LOC = "K17" | IOSTANDARD = LVCMOS33 ;
-NET "CAM_XCLK"   LOC = "K18" | IOSTANDARD = LVCMOS33 ;   # clock to the camera
+NET "CAM_RESET"  LOC = "P18" | IOSTANDARD = LVCMOS25 ;
+NET "CAM_PWDN"   LOC = "R18" | IOSTANDARD = LVCMOS25 ;
+NET "CAM_SIO_D"  LOC = "K14" | IOSTANDARD = LVCMOS25 ;
+NET "CAM_SIO_C"  LOC = "K13" | IOSTANDARD = LVCMOS25 ;
+NET "CAM_VSYNC"  LOC = "K15" | IOSTANDARD = LVCMOS25 ;
+NET "CAM_HREF"   LOC = "K17" | IOSTANDARD = LVCMOS25 ;
+NET "CAM_XCLK"   LOC = "K18" | IOSTANDARD = LVCMOS25 ;   # clock to the camera
 NET "CAM_PCLK"   LOC = "N10" | IOSTANDARD = LVCMOS33 ;   # clock from the camera
-NET "CAM_D<9>" LOC = "L15" | IOSTANDARD = LVCMOS33 ;
-NET "CAM_D<8>" LOC = "L16" | IOSTANDARD = LVCMOS33 ;
-NET "CAM_D<7>" LOC = "L18" | IOSTANDARD = LVCMOS33 ;
-NET "CAM_D<6>" LOC = "L17" | IOSTANDARD = LVCMOS33 ;
-NET "CAM_D<5>" LOC = "M16" | IOSTANDARD = LVCMOS33 ;
-NET "CAM_D<4>" LOC = "N17" | IOSTANDARD = LVCMOS33 ;
-NET "CAM_D<3>" LOC = "M15" | IOSTANDARD = LVCMOS33 ;
-NET "CAM_D<2>" LOC = "P17" | IOSTANDARD = LVCMOS33 ;
-NET "CAM_D<1>" LOC = "N15" | IOSTANDARD = LVCMOS33 ;
-NET "CAM_D<0>" LOC = "P15" | IOSTANDARD = LVCMOS33 ;
+NET "CAM_D<9>" LOC = "L15" | IOSTANDARD = LVCMOS25 ;
+NET "CAM_D<8>" LOC = "L16" | IOSTANDARD = LVCMOS25 ;
+NET "CAM_D<7>" LOC = "L18" | IOSTANDARD = LVCMOS25 ;
+NET "CAM_D<6>" LOC = "L17" | IOSTANDARD = LVCMOS25 ;
+NET "CAM_D<5>" LOC = "M16" | IOSTANDARD = LVCMOS25 ;
+NET "CAM_D<4>" LOC = "N17" | IOSTANDARD = LVCMOS25 ;
+NET "CAM_D<3>" LOC = "M15" | IOSTANDARD = LVCMOS25 ;
+NET "CAM_D<2>" LOC = "P17" | IOSTANDARD = LVCMOS25 ;
+NET "CAM_D<1>" LOC = "N15" | IOSTANDARD = LVCMOS25 ;
+NET "CAM_D<0>" LOC = "P15" | IOSTANDARD = LVCMOS25 ;
 
 # ---- Audio (3.12): stereo PWM and piezo buzzer
 NET "AUDIO_L"  LOC = "U4" | IOSTANDARD = LVCMOS33 ;
