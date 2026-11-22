@@ -115,6 +115,10 @@ impl std::fmt::Display for Outcome {
 
 #[derive(Debug, Clone)]
 pub enum JobEvent {
+    /// A progress message from the flow itself (not from a tool).
+    Note {
+        text: String,
+    },
     Started {
         job: String,
         command: String,

@@ -1,15 +1,16 @@
-//! CLI front ends for the flow stages.
+//! CLI front ends: run a `fpgaflow_flow` action and print its results.
 
+use std::future::Future;
 use std::path::Path;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use fpgaflow_core::job::JobEvent;
 use fpgaflow_core::project::{Project, SimTool};
-use fpgaflow_core::{tools, UserConfig};
-use fpgaflow_hdl::design::{self, AnalyseRequest};
+use fpgaflow_core::stage::{Summary, Verdict};
+use fpgaflow_core::UserConfig;
+use fpgaflow_flow::boards::{self, Hotplug, Identity, UsbDevice};
+use fpgaflow_flow::{rel, BuildOptions, Ctx};
 use fpgaflow_hdl::Severity;
-use fpgaflow_sim::{gtkwave, Plan, Summary, Verdict};
-use fpgaflow_synth::report::Utilisation;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -21,9 +22,14 @@ fn sim_tool(project: &Project, arg: Option<&str>) -> SimTool {
     }
 }
 
-/// Run a plan, printing output live. Ctrl-C cancels the running job (jobs
-/// run in their own process group, so the terminal's SIGINT doesn't reach them).
-fn run_plan(plan: &Plan) -> Result<Summary> {
+/// Run an async flow action, printing its events live. Ctrl-C cancels the
+/// running job (jobs run in their own process group, so the terminal's SIGINT
+/// doesn't reach them directly).
+fn run<T, F, Fut>(f: F) -> Result<T>
+where
+    F: FnOnce(Ctx) -> Fut,
+    Fut: Future<Output = Result<T>>,
+{
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let (tx, mut rx) = mpsc::unbounded_channel();
@@ -38,6 +44,7 @@ fn run_plan(plan: &Plan) -> Result<Summary> {
         let printer = tokio::spawn(async move {
             while let Some(ev) = rx.recv().await {
                 match ev {
+                    JobEvent::Note { text } => eprintln!("== {text}"),
                     JobEvent::Started { command, .. } => eprintln!("$ {command}"),
                     JobEvent::Line { text, .. } => println!("{text}"),
                     JobEvent::Finished {
@@ -50,10 +57,9 @@ fn run_plan(plan: &Plan) -> Result<Summary> {
                 }
             }
         });
-        let summary = fpgaflow_sim::execute(plan, &tx, &cancel).await;
-        drop(tx);
+        let result = f(Ctx { events: tx, cancel }).await;
         let _ = printer.await;
-        Ok(summary?)
+        result
     })
 }
 
@@ -73,7 +79,7 @@ fn report(project: &Project, s: &Summary) {
         eprintln!("\n{errors} error(s), {warnings} warning(s):");
         for d in diags.iter().filter(|d| d.severity != Severity::Note) {
             let mut d = d.clone();
-            d.file = fpgaflow_sim::rel(project, &d.file).to_path_buf();
+            d.file = rel(project, &d.file).to_path_buf();
             eprintln!("  {d}");
         }
     }
@@ -84,8 +90,10 @@ fn report(project: &Project, s: &Summary) {
 
 pub fn lint(dir: &Path, cfg: &UserConfig) -> Result<()> {
     let project = Project::find(dir)?;
-    let plan = fpgaflow_sim::plan_lint(&project, cfg)?;
-    let s = run_plan(&plan)?;
+    let s = run(|ctx| {
+        let project = &project;
+        async move { fpgaflow_flow::lint(project, cfg, &ctx).await }
+    })?;
     report(&project, &s);
     if !s.ok {
         bail!("lint failed");
@@ -97,8 +105,10 @@ pub fn lint(dir: &Path, cfg: &UserConfig) -> Result<()> {
 pub fn sim(dir: &Path, cfg: &UserConfig, tool: Option<&str>, waves: bool) -> Result<()> {
     let project = Project::find(dir)?;
     let tool = sim_tool(&project, tool);
-    let plan = fpgaflow_sim::plan_sim(&project, cfg, tool)?;
-    let s = run_plan(&plan)?;
+    let s = run(|ctx| {
+        let project = &project;
+        async move { fpgaflow_flow::simulate(project, cfg, tool, &ctx).await }
+    })?;
     report(&project, &s);
     match s.verdict {
         Some(Verdict::Pass) => eprintln!("\nSIMULATION PASSED ({tool:?})"),
@@ -109,9 +119,13 @@ pub fn sim(dir: &Path, cfg: &UserConfig, tool: Option<&str>, waves: bool) -> Res
         _ => {}
     }
     if let Some(w) = s.outputs.first() {
-        eprintln!("waveform: {}", fpgaflow_sim::rel(&project, w).display());
+        eprintln!("waveform: {}", rel(&project, w).display());
         if waves {
-            open_waves(&project, cfg, tool, w)?;
+            let layout = fpgaflow_flow::open_waves(&project, cfg, tool)?;
+            eprintln!(
+                "GTKWave layout: {} (save from GTKWave to keep your view)",
+                rel(&project, &layout).display()
+            );
         }
     }
     if !s.ok {
@@ -120,56 +134,20 @@ pub fn sim(dir: &Path, cfg: &UserConfig, tool: Option<&str>, waves: bool) -> Res
     Ok(())
 }
 
-fn open_waves(project: &Project, cfg: &UserConfig, tool: SimTool, wave: &Path) -> Result<()> {
-    let gtk = tools::resolve("gtkwave", cfg)
-        .context("gtkwave is not installed (run `fpgaflow doctor`)")?;
-    let top = fpgaflow_sim::tb_top(project)?;
-    let layout = gtkwave::ensure_layout(project, &top, tool, wave)?;
-    gtkwave::open(&gtk, wave, Some(&layout))?;
+pub fn waves(dir: &Path, cfg: &UserConfig, tool: Option<&str>) -> Result<()> {
+    let project = Project::find(dir)?;
+    let tool = sim_tool(&project, tool);
+    let layout = fpgaflow_flow::open_waves(&project, cfg, tool)?;
     eprintln!(
         "GTKWave layout: {} (save from GTKWave to keep your view)",
-        fpgaflow_sim::rel(project, &layout).display()
+        rel(&project, &layout).display()
     );
     Ok(())
 }
 
-pub fn waves(dir: &Path, cfg: &UserConfig, tool: Option<&str>) -> Result<()> {
-    let project = Project::find(dir)?;
-    let tool = sim_tool(&project, tool);
-    let top = fpgaflow_sim::tb_top(&project)?;
-    let wave = fpgaflow_sim::sim_workdir(&project, tool)
-        .join(format!("{top}.{}", project.file.sim.wave.extension()));
-    if !wave.is_file() {
-        bail!(
-            "no waveform at {}; run `fpgaflow sim` first",
-            wave.display()
-        );
-    }
-    open_waves(&project, cfg, tool, &wave)
-}
-
 pub fn hier(dir: &Path, cfg: &UserConfig, top: Option<String>) -> Result<()> {
     let project = Project::find(dir)?;
-    let yosys =
-        tools::resolve("yosys", cfg).context("yosys is not installed (run `fpgaflow doctor`)")?;
-    let req = AnalyseRequest {
-        files: project.rtl_files()?,
-        include_dirs: project.include_dirs(),
-        defines: project.file.sources.defines.clone(),
-        top: top.or_else(|| project.file.project.top.clone()),
-        slang: false,
-    };
-    let d = match design::analyse(&yosys, &req, &project.stage_dir("analyse")) {
-        Ok(d) => d,
-        Err(design::DesignError::Yosys { diagnostics, log }) => {
-            eprintln!("{log}");
-            for d in diagnostics {
-                eprintln!("  {d}");
-            }
-            bail!("yosys could not elaborate the design");
-        }
-        Err(e) => return Err(e.into()),
-    };
+    let d = fpgaflow_flow::analyse(&project, cfg, top)?;
     for m in &d.modules {
         println!("{}{}", m.name, if m.is_top { "  (top)" } else { "" });
         for p in &m.ports {
@@ -192,6 +170,13 @@ pub fn hier(dir: &Path, cfg: &UserConfig, top: Option<String>) -> Result<()> {
     Ok(())
 }
 
+fn print_utilisation(u: &fpgaflow_synth::report::Utilisation) {
+    println!("\nUtilisation ({} cells)", u.cells);
+    for (cat, n) in &u.by_category {
+        println!("  {:<18} {n:>8}", cat.label());
+    }
+}
+
 pub fn synth(
     dir: &Path,
     cfg: &UserConfig,
@@ -199,44 +184,24 @@ pub fn synth(
     backend: Option<&str>,
 ) -> Result<()> {
     let project = Project::find(dir)?;
-    let target = fpgaflow_synth::resolve_target(&project, family, backend)?;
-    eprintln!(
-        "Target: {} ({}), backend {} -> {} netlist",
-        target.family.name,
-        target.family.id,
-        target.backend.name,
-        target.backend.netlist.extension()
-    );
-    if let Some(why) = &target.family.experimental {
-        eprintln!("note: {why}; check the result carefully.");
-    }
-    let sp = fpgaflow_synth::plan_synth(&project, cfg, target)?;
-    let s = run_plan(&sp.plan)?;
-    report(&project, &s);
-    if !s.ok {
-        eprintln!(
-            "full log: {}",
-            fpgaflow_sim::rel(&project, &sp.log).display()
-        );
+    let out = run(|ctx| {
+        let project = &project;
+        async move { fpgaflow_flow::synthesize(project, cfg, family, backend, &ctx).await }
+    })?;
+    report(&project, &out.summary);
+    if !out.summary.ok {
+        eprintln!("full log: {}", rel(&project, &out.log).display());
         bail!("synthesis failed");
     }
-    let u = Utilisation::from_stat_json(&std::fs::read_to_string(&sp.stat)?)?;
-    println!("\nUtilisation ({} cells)", u.cells);
-    for (cat, n) in &u.by_category {
-        println!("  {:<18} {n:>8}", cat.label());
+    if let Some(u) = &out.utilisation {
+        print_utilisation(u);
+        println!("\nBy primitive");
+        for (cell, n) in &u.by_type {
+            println!("  {cell:<18} {n:>8}");
+        }
     }
-    println!("\nBy primitive");
-    for (cell, n) in &u.by_type {
-        println!("  {cell:<18} {n:>8}");
-    }
-    println!(
-        "\nnetlist: {}",
-        fpgaflow_sim::rel(&project, &sp.netlist).display()
-    );
-    println!(
-        "log:     {}",
-        fpgaflow_sim::rel(&project, &sp.log).display()
-    );
+    println!("\nnetlist: {}", rel(&project, &out.netlist).display());
+    println!("log:     {}", rel(&project, &out.log).display());
     Ok(())
 }
 
@@ -284,94 +249,26 @@ pub fn build(
     backend: Option<&str>,
     allow_unconstrained: bool,
 ) -> Result<()> {
-    use fpgaflow_pnr::{constraints, ise};
-
     let project = Project::find(dir)?;
-    let target = fpgaflow_synth::resolve_target(&project, family, backend)?;
-    if target.backend.id != "ise" {
-        return Err(fpgaflow_pnr::PnrError::NotImplemented(target.backend.id.clone()).into());
-    }
-
-    // 1. Pin check before spending any time: every top-level port bit needs a LOC.
-    let yosys =
-        tools::resolve("yosys", cfg).context("yosys is not installed (run `fpgaflow doctor`)")?;
-    let req = AnalyseRequest {
-        files: project.rtl_files()?,
-        include_dirs: project.include_dirs(),
-        defines: project.file.sources.defines.clone(),
-        top: project.file.project.top.clone(),
-        slang: false,
+    let opts = BuildOptions {
+        family: family.map(String::from),
+        backend: backend.map(String::from),
+        allow_unconstrained,
     };
-    let design = design::analyse(&yosys, &req, &project.stage_dir("analyse")).map_err(|e| {
-        anyhow::anyhow!("elaboration failed: {e} (run `fpgaflow hier` for details)")
+    let out = run(|ctx| {
+        let (project, opts) = (&project, &opts);
+        async move { fpgaflow_flow::build(project, cfg, opts, &ctx).await }
     })?;
-    let top = design.top().context("Yosys found no top module")?.clone();
-    let mut located = std::collections::BTreeSet::new();
-    for f in fpgaflow_pnr::constraint_files(&project) {
-        let text =
-            std::fs::read_to_string(&f).with_context(|| format!("reading {}", f.display()))?;
-        located.extend(constraints::ucf_located_nets(&text));
+    for s in &out.stages {
+        report(&project, s);
     }
-    let missing = constraints::unconstrained(&top.ports, &located);
-    if !missing.is_empty() {
-        let err = fpgaflow_pnr::PnrError::Unconstrained(missing);
-        if !allow_unconstrained {
-            return Err(err.into());
+    if let Some(why) = &out.failure {
+        if out.bitstream.is_none() {
+            bail!("{why}");
         }
-        eprintln!("warning: {err}");
     }
-
-    // 2. Synthesis.
-    eprintln!(
-        "== synthesis: {} -> {}",
-        target.family.name, target.backend.name
-    );
-    let sp = fpgaflow_synth::plan_synth(&project, cfg, target)?;
-    let s = run_plan(&sp.plan)?;
-    report(&project, &s);
-    if !s.ok {
-        bail!(
-            "synthesis failed (log: {})",
-            fpgaflow_sim::rel(&project, &sp.log).display()
-        );
-    }
-
-    // 3. Translate, map, place & route, timing.
-    let ip = ise::plan_implement(&project, cfg, &sp.netlist, &top.name)?;
-    eprintln!("== implementation: {} on {}", top.name, ip.part);
-    let mut s = run_plan(&ip.plan)?;
-    ip.remap(&mut s.diagnostics);
-    report(&project, &s);
-    if !s.ok {
-        bail!("implementation failed");
-    }
-
-    // 4. Pad report check: refuse to make a bitstream with tool-chosen pins.
-    let pads = ise::parse_pad_report(&std::fs::read_to_string(&ip.files.pad)?);
-    let auto: Vec<String> = ise::unlocated(&pads)
-        .iter()
-        .map(|r| format!("{}@{}", r.signal, r.pin))
-        .collect();
-    if !auto.is_empty() && !allow_unconstrained {
-        bail!(
-            "ISE placed these pins itself (UNLOCATED in the pad report): {}; no bitstream written",
-            auto.join(", ")
-        );
-    }
-
-    // 5. Bitstream.
-    let mode = project.file.program.mode;
-    let bp = ise::plan_bitstream(&ip, mode);
-    eprintln!("== bitstream ({mode:?} load)");
-    let s = run_plan(&bp)?;
-    report(&project, &s);
-    if !s.ok {
-        bail!("bitgen failed");
-    }
-
-    // Summary.
-    println!("\nResources ({})", ip.part);
-    for r in ise::parse_map_report(&std::fs::read_to_string(&ip.files.mrp)?) {
+    println!("\nResources ({})", out.part.as_deref().unwrap_or("?"));
+    for r in &out.resources {
         let pct = if r.available > 0 {
             100.0 * r.used as f64 / r.available as f64
         } else {
@@ -382,49 +279,42 @@ pub fn build(
             r.name, r.used, r.available
         );
     }
-    let t = ise::parse_timing_report(&std::fs::read_to_string(&ip.files.twr)?);
     println!("\nTiming");
-    match (t.errors, t.fmax_mhz) {
-        (Some(0), Some(f)) => println!(
-            "  all constraints met; Fmax {f:.1} MHz (min period {:.3} ns)",
-            t.min_period_ns.unwrap_or(0.0)
-        ),
-        (Some(e), _) if e > 0 => println!("  {e} TIMING ERROR(S), score {}", t.score.unwrap_or(0)),
-        _ => println!(
-            "  no timing summary found (see {})",
-            fpgaflow_sim::rel(&project, &ip.files.twr).display()
-        ),
+    match out.timing.as_ref().map(|t| (t.errors, t.fmax_mhz, t)) {
+        Some((Some(0), Some(f), t)) => {
+            println!(
+                "  all constraints met; Fmax {f:.1} MHz (min period {:.3} ns)",
+                t.min_period_ns.unwrap_or(0.0)
+            )
+        }
+        Some((Some(e), _, t)) if e > 0 => {
+            println!("  {e} TIMING ERROR(S), score {}", t.score.unwrap_or(0))
+        }
+        _ => println!("  no timing summary found"),
     }
     println!("\nPins");
-    for r in &pads {
+    for r in &out.pins {
         println!(
             "  {:<10} {:<6} {:<8} {:<11} {}",
             r.signal, r.pin, r.direction, r.io_standard, r.constraint
         );
     }
-    println!(
-        "\nbitstream: {}",
-        fpgaflow_sim::rel(&project, &ip.files.bit).display()
-    );
-    if t.errors.is_some_and(|e| e > 0) {
-        bail!("timing not met");
+    if let Some(b) = &out.bitstream {
+        println!("\nbitstream: {}", rel(&project, b).display());
+    }
+    if let Some(why) = out.failure {
+        bail!("{why}");
     }
     Ok(())
 }
 
 pub fn program(dir: &Path, cfg: &UserConfig, bit: Option<std::path::PathBuf>) -> Result<()> {
     let project = Project::find(dir)?;
-    let board = fpgaflow_program::project_board(&project)?;
-    let bit = bit
-        .map(|b| dir.join(b))
-        .unwrap_or_else(|| fpgaflow_program::default_bitstream(&project));
-    eprintln!(
-        "== program: {} -> {} (SRAM, volatile)",
-        fpgaflow_sim::rel(&project, &bit).display(),
-        board.name
-    );
-    let plan = fpgaflow_program::plan_program(&project, cfg, &bit)?;
-    let s = run_plan(&plan)?;
+    let bit = bit.map(|b| dir.join(b));
+    let s = run(|ctx| {
+        let (project, bit) = (&project, bit.as_deref());
+        async move { fpgaflow_flow::program(project, cfg, bit, &ctx).await }
+    })?;
     report(&project, &s);
     if !s.ok {
         bail!("programming failed");
@@ -435,9 +325,10 @@ pub fn program(dir: &Path, cfg: &UserConfig, bit: Option<std::path::PathBuf>) ->
 
 pub fn detect(dir: &Path, cfg: &UserConfig) -> Result<()> {
     let project = Project::find(dir)?;
-    let board = fpgaflow_program::project_board(&project)?;
-    let plan = fpgaflow_program::plan_detect(board, cfg, &project.stage_dir("program"))?;
-    let s = run_plan(&plan)?;
+    let s = run(|ctx| {
+        let project = &project;
+        async move { fpgaflow_flow::detect(project, cfg, &ctx).await }
+    })?;
     if !s.ok {
         bail!("JTAG scan failed");
     }
@@ -455,14 +346,7 @@ pub fn boards() -> Result<()> {
     Ok(())
 }
 
-fn cables(cfg: &UserConfig) -> Vec<fpgaflow_boards::Cable> {
-    tools::resolve("openFPGALoader", cfg)
-        .map(|o| fpgaflow_boards::load_cable_list(&o))
-        .unwrap_or_default()
-}
-
-fn describe(d: &fpgaflow_boards::UsbDevice, id: &fpgaflow_boards::Identity) -> String {
-    use fpgaflow_boards::Identity;
+pub fn describe(d: &UsbDevice, id: &Identity) -> String {
     let what = match id {
         Identity::Board { name, .. } => format!("BOARD  {name}"),
         Identity::Cable { names } => format!("CABLE  {}", names.join(" / ")),
@@ -483,11 +367,10 @@ fn describe(d: &fpgaflow_boards::UsbDevice, id: &fpgaflow_boards::Identity) -> S
 }
 
 pub fn usb(cfg: &UserConfig, all: bool) -> Result<()> {
-    use fpgaflow_boards::Identity;
-    let cables = cables(cfg);
+    let cables = fpgaflow_flow::cables(cfg);
     let mut shown = 0;
-    for d in fpgaflow_boards::scan()? {
-        let id = fpgaflow_boards::identify(&d, &cables);
+    for d in boards::scan()? {
+        let id = boards::identify(&d, &cables);
         if all || id != Identity::Unknown {
             println!("{}", describe(&d, &id));
             shown += 1;
@@ -503,24 +386,23 @@ pub fn usb(cfg: &UserConfig, all: bool) -> Result<()> {
 }
 
 pub fn watch(cfg: &UserConfig) -> Result<()> {
-    use fpgaflow_boards::{Hotplug, Identity};
-    let cables = cables(cfg);
-    let present = fpgaflow_boards::scan()?;
+    let cables = fpgaflow_flow::cables(cfg);
+    let present = boards::scan()?;
     for d in &present {
-        let id = fpgaflow_boards::identify(d, &cables);
+        let id = boards::identify(d, &cables);
         if id != Identity::Unknown {
             println!("  {}", describe(d, &id));
         }
     }
     let (tx, rx) = std::sync::mpsc::channel();
-    let _watcher = fpgaflow_boards::watch(&present, tx)?;
+    let _watcher = boards::watch(&present, tx)?;
     eprintln!("watching USB (Ctrl-C to stop)");
     for ev in rx {
         let (sign, d) = match &ev {
             Hotplug::Added(d) => ('+', d),
             Hotplug::Removed(d) => ('-', d),
         };
-        let id = fpgaflow_boards::identify(d, &cables);
+        let id = boards::identify(d, &cables);
         if id != Identity::Unknown {
             println!("{sign} {}", describe(d, &id));
         }

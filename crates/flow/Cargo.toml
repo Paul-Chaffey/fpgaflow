@@ -1,0 +1,21 @@
+[package]
+name = "fpgaflow-flow"
+description = "Flow orchestration for fpgaflow, shared by the CLI and the GUI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+fpgaflow-core.workspace = true
+fpgaflow-hdl.workspace = true
+fpgaflow-sim.workspace = true
+fpgaflow-synth.workspace = true
+fpgaflow-pnr.workspace = true
+fpgaflow-program.workspace = true
+fpgaflow-boards.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true

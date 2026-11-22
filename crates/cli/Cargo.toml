@@ -24,5 +24,6 @@ fpgaflow-synth.workspace = true
 fpgaflow-pnr.workspace = true
 fpgaflow-program.workspace = true
 fpgaflow-boards.workspace = true
+fpgaflow-flow.workspace = true
 tokio = { workspace = true, features = ["signal"] }
 tokio-util.workspace = true

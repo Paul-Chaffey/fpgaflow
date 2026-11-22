@@ -1,0 +1,336 @@
+//! Flow orchestration shared by the CLI and the GUI.
+//!
+//! Each function runs one user-level action (lint, simulate, synthesise,
+//! build, program, ...) and streams everything it does to `events`:
+//! [`JobEvent::Note`] for the flow's own progress, the job runner's events
+//! for tool output. Cancelling `cancel` stops the running tool.
+//!
+//! Errors (`Err`) mean the action could not start or was refused for safety
+//! (missing tool, unconstrained pin, ...). A stage that ran and failed is a
+//! normal result with `ok == false`, so callers still get its diagnostics.
+
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result};
+use fpgaflow_core::job::JobEvent;
+use fpgaflow_core::project::{Project, SimTool};
+use fpgaflow_core::stage::{self, Plan, Summary};
+use fpgaflow_core::{tools, UserConfig};
+use fpgaflow_hdl::design::{self, AnalyseRequest, Design};
+use fpgaflow_pnr::ise::{self, PadRow, Resource, Timing};
+use fpgaflow_pnr::{constraints, PnrError};
+use fpgaflow_sim::gtkwave;
+use fpgaflow_synth::report::Utilisation;
+use fpgaflow_synth::Target;
+use tokio::sync::mpsc::UnboundedSender;
+use tokio_util::sync::CancellationToken;
+
+pub use fpgaflow_boards as boards;
+
+/// Where events go and how to cancel; passed to every action.
+#[derive(Clone)]
+pub struct Ctx {
+    pub events: UnboundedSender<JobEvent>,
+    pub cancel: CancellationToken,
+}
+
+impl Ctx {
+    pub fn note(&self, text: impl Into<String>) {
+        let _ = self.events.send(JobEvent::Note { text: text.into() });
+    }
+
+    async fn run(&self, plan: &Plan) -> Result<Summary> {
+        Ok(stage::execute(plan, &self.events, &self.cancel).await?)
+    }
+}
+
+pub fn rel<'a>(project: &Project, p: &'a Path) -> &'a Path {
+    p.strip_prefix(&project.root).unwrap_or(p)
+}
+
+// ------------------------------------------------------------------ lint & sim
+
+pub async fn lint(project: &Project, cfg: &UserConfig, ctx: &Ctx) -> Result<Summary> {
+    let plan = fpgaflow_sim::plan_lint(project, cfg)?;
+    ctx.run(&plan).await
+}
+
+pub async fn simulate(
+    project: &Project,
+    cfg: &UserConfig,
+    tool: SimTool,
+    ctx: &Ctx,
+) -> Result<Summary> {
+    let plan = fpgaflow_sim::plan_sim(project, cfg, tool)?;
+    ctx.note(format!("simulating with {tool:?}"));
+    ctx.run(&plan).await
+}
+
+/// Waveform file the last simulation with `tool` writes.
+pub fn wave_path(project: &Project, tool: SimTool) -> Result<PathBuf> {
+    let top = fpgaflow_sim::tb_top(project)?;
+    Ok(fpgaflow_sim::sim_workdir(project, tool)
+        .join(format!("{top}.{}", project.file.sim.wave.extension())))
+}
+
+/// Open the last waveform in GTKWave; returns the layout file used.
+pub fn open_waves(project: &Project, cfg: &UserConfig, tool: SimTool) -> Result<PathBuf> {
+    let wave = wave_path(project, tool)?;
+    anyhow::ensure!(
+        wave.is_file(),
+        "no waveform at {}; run a simulation first",
+        wave.display()
+    );
+    let gtk = tools::resolve("gtkwave", cfg).context("gtkwave is not installed (see Doctor)")?;
+    let top = fpgaflow_sim::tb_top(project)?;
+    let layout = gtkwave::ensure_layout(project, &top, tool, &wave)?;
+    gtkwave::open(&gtk, &wave, Some(&layout))?;
+    Ok(layout)
+}
+
+// ------------------------------------------------------------------ analysis
+
+/// Elaborate the RTL with Yosys (hierarchy and ports).
+pub fn analyse(project: &Project, cfg: &UserConfig, top: Option<String>) -> Result<Design> {
+    let yosys = tools::resolve("yosys", cfg).context("yosys is not installed (see Doctor)")?;
+    let req = AnalyseRequest {
+        files: project.rtl_files()?,
+        include_dirs: project.include_dirs(),
+        defines: project.file.sources.defines.clone(),
+        top: top.or_else(|| project.file.project.top.clone()),
+        slang: false,
+    };
+    match design::analyse(&yosys, &req, &project.stage_dir("analyse")) {
+        Ok(d) => Ok(d),
+        Err(design::DesignError::Yosys { diagnostics, .. }) => {
+            let first: Vec<String> = diagnostics.iter().take(3).map(|d| d.to_string()).collect();
+            anyhow::bail!("Yosys could not elaborate the design: {}", first.join("; "))
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+// ------------------------------------------------------------------ synthesis
+
+pub struct SynthOutput {
+    pub summary: Summary,
+    pub target: Target,
+    pub netlist: PathBuf,
+    pub log: PathBuf,
+    pub utilisation: Option<Utilisation>,
+}
+
+pub async fn synthesize(
+    project: &Project,
+    cfg: &UserConfig,
+    family: Option<&str>,
+    backend: Option<&str>,
+    ctx: &Ctx,
+) -> Result<SynthOutput> {
+    let target = fpgaflow_synth::resolve_target(project, family, backend)?;
+    ctx.note(format!(
+        "synthesis: {} ({}) for {} -> {} netlist",
+        target.family.name,
+        target.family.id,
+        target.backend.name,
+        target.backend.netlist.extension()
+    ));
+    if let Some(why) = &target.family.experimental {
+        ctx.note(format!("note: {why}; check the result carefully"));
+    }
+    let sp = fpgaflow_synth::plan_synth(project, cfg, target)?;
+    let summary = ctx.run(&sp.plan).await?;
+    let utilisation = if summary.ok {
+        Some(Utilisation::from_stat_json(&std::fs::read_to_string(
+            &sp.stat,
+        )?)?)
+    } else {
+        None
+    };
+    Ok(SynthOutput {
+        summary,
+        target,
+        netlist: sp.netlist,
+        log: sp.log,
+        utilisation,
+    })
+}
+
+// ------------------------------------------------------------------ build
+
+#[derive(Debug, Clone, Default)]
+pub struct BuildOptions {
+    pub family: Option<String>,
+    pub backend: Option<String>,
+    /// Build even with tool-chosen pins. Unsafe on real hardware.
+    pub allow_unconstrained: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct BuildOutput {
+    /// Every stage that ran, in order.
+    pub stages: Vec<Summary>,
+    pub ok: bool,
+    /// Why the build stopped, if it did.
+    pub failure: Option<String>,
+    pub part: Option<String>,
+    pub utilisation: Option<Utilisation>,
+    pub resources: Vec<Resource>,
+    pub timing: Option<Timing>,
+    pub pins: Vec<PadRow>,
+    pub bitstream: Option<PathBuf>,
+}
+
+impl BuildOutput {
+    fn fail(mut self, why: impl Into<String>) -> Self {
+        self.ok = false;
+        self.failure = Some(why.into());
+        self
+    }
+}
+
+/// Port bits of the design's top with no `LOC` in the project's UCFs.
+pub fn unconstrained_ports(project: &Project, design: &Design) -> Result<(String, Vec<String>)> {
+    let top = design.top().context("Yosys found no top module")?.clone();
+    let mut located = BTreeSet::new();
+    for f in fpgaflow_pnr::constraint_files(project) {
+        let text =
+            std::fs::read_to_string(&f).with_context(|| format!("reading {}", f.display()))?;
+        located.extend(constraints::ucf_located_nets(&text));
+    }
+    Ok((
+        top.name.clone(),
+        constraints::unconstrained(&top.ports, &located),
+    ))
+}
+
+/// Synthesis → place & route → timing → bitstream, with the pin safety
+/// checks before synthesis and before bitgen.
+pub async fn build(
+    project: &Project,
+    cfg: &UserConfig,
+    opts: &BuildOptions,
+    ctx: &Ctx,
+) -> Result<BuildOutput> {
+    let target =
+        fpgaflow_synth::resolve_target(project, opts.family.as_deref(), opts.backend.as_deref())?;
+    if target.backend.id != "ise" {
+        return Err(PnrError::NotImplemented(target.backend.id.clone()).into());
+    }
+
+    // 1. Every top-level port bit needs a LOC before anything is built.
+    let design = analyse(project, cfg, None)?;
+    let (top, missing) = unconstrained_ports(project, &design)?;
+    if !missing.is_empty() {
+        let err = PnrError::Unconstrained(missing);
+        if !opts.allow_unconstrained {
+            return Err(err.into());
+        }
+        ctx.note(format!("warning: {err}"));
+    }
+
+    let mut out = BuildOutput::default();
+
+    // 2. Synthesis.
+    let s = synthesize(
+        project,
+        cfg,
+        opts.family.as_deref(),
+        opts.backend.as_deref(),
+        ctx,
+    )
+    .await?;
+    out.stages.push(s.summary.clone());
+    out.utilisation = s.utilisation.clone();
+    if !s.summary.ok {
+        return Ok(out.fail(format!(
+            "synthesis failed (log: {})",
+            rel(project, &s.log).display()
+        )));
+    }
+
+    // 3. Translate, map, place & route, timing.
+    let ip = ise::plan_implement(project, cfg, &s.netlist, &top)?;
+    out.part = Some(ip.part.clone());
+    ctx.note(format!("implementation: {top} on {}", ip.part));
+    let mut summary = ctx.run(&ip.plan).await?;
+    ip.remap(&mut summary.diagnostics);
+    let impl_ok = summary.ok;
+    out.stages.push(summary);
+    if !impl_ok {
+        return Ok(out.fail("implementation failed"));
+    }
+    out.resources = ise::parse_map_report(&std::fs::read_to_string(&ip.files.mrp)?);
+    out.timing = Some(ise::parse_timing_report(&std::fs::read_to_string(
+        &ip.files.twr,
+    )?));
+    out.pins = ise::parse_pad_report(&std::fs::read_to_string(&ip.files.pad)?);
+
+    // 4. No bitstream with tool-chosen pins.
+    let auto: Vec<String> = ise::unlocated(&out.pins)
+        .iter()
+        .map(|r| format!("{}@{}", r.signal, r.pin))
+        .collect();
+    if !auto.is_empty() && !opts.allow_unconstrained {
+        return Ok(out.fail(format!(
+            "ISE placed these pins itself (UNLOCATED in the pad report): {}; no bitstream written",
+            auto.join(", ")
+        )));
+    }
+
+    // 5. Bitstream.
+    let mode = project.file.program.mode;
+    ctx.note(format!("bitstream ({mode:?} load)"));
+    let summary = ctx.run(&ise::plan_bitstream(&ip, mode)).await?;
+    let bit_ok = summary.ok;
+    out.stages.push(summary);
+    if !bit_ok {
+        return Ok(out.fail("bitgen failed"));
+    }
+    out.bitstream = Some(ip.files.bit.clone());
+    if out
+        .timing
+        .as_ref()
+        .and_then(|t| t.errors)
+        .is_some_and(|e| e > 0)
+    {
+        return Ok(out.fail("timing not met"));
+    }
+    out.ok = true;
+    Ok(out)
+}
+
+// ------------------------------------------------------------------ program
+
+pub async fn program(
+    project: &Project,
+    cfg: &UserConfig,
+    bit: Option<&Path>,
+    ctx: &Ctx,
+) -> Result<Summary> {
+    let board = fpgaflow_program::project_board(project)?;
+    let bit = bit
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| fpgaflow_program::default_bitstream(project));
+    ctx.note(format!(
+        "program: {} -> {} (SRAM, volatile)",
+        rel(project, &bit).display(),
+        board.name
+    ));
+    let plan = fpgaflow_program::plan_program(project, cfg, &bit)?;
+    ctx.run(&plan).await
+}
+
+pub async fn detect(project: &Project, cfg: &UserConfig, ctx: &Ctx) -> Result<Summary> {
+    let board = fpgaflow_program::project_board(project)?;
+    let plan = fpgaflow_program::plan_detect(board, cfg, &project.stage_dir("program"))?;
+    ctx.run(&plan).await
+}
+
+/// openFPGALoader's cable table (empty if it isn't installed).
+pub fn cables(cfg: &UserConfig) -> Vec<boards::Cable> {
+    tools::resolve("openFPGALoader", cfg)
+        .map(|o| boards::load_cable_list(&o))
+        .unwrap_or_default()
+}

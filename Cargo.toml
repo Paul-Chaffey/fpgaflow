@@ -36,3 +36,4 @@ fpgaflow-synth = { path = "crates/synth" }
 fpgaflow-pnr = { path = "crates/pnr" }
 fpgaflow-program = { path = "crates/program" }
 fpgaflow-boards = { path = "crates/boards" }
+fpgaflow-flow = { path = "crates/flow" }

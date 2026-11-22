@@ -218,6 +218,7 @@ dependencies = [
  "fpgaflow-boards",
  "fpgaflow-core",
  "fpgaflow-editor",
+ "fpgaflow-flow",
  "fpgaflow-hdl",
  "fpgaflow-pnr",
  "fpgaflow-program",
@@ -255,6 +256,22 @@ dependencies = [
  "fpgaflow-core",
  "shell-words",
  "thiserror",
+]
+
+[[package]]
+name = "fpgaflow-flow"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "fpgaflow-boards",
+ "fpgaflow-core",
+ "fpgaflow-hdl",
+ "fpgaflow-pnr",
+ "fpgaflow-program",
+ "fpgaflow-sim",
+ "fpgaflow-synth",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]
