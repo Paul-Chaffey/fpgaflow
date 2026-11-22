@@ -1,0 +1,25 @@
+[project]
+name = "rc10-music"
+top = "music_top"
+
+[sources]
+rtl = ["rtl/**/*.sv"]
+tb = ["tb/**/*.sv"]
+
+[sim]
+tool = "verilator"     # or "icarus"
+tb_top = "tb_music"
+wave = "fst"
+
+# Celoxica RC10 (XC3S1500-4FG320), loaded over its own USB port.
+[target]
+board = "rc10"
+family = "spartan3"
+device = "xc3s1500"
+package = "fg320"
+speed = "4"
+backend = "ise"
+constraints = ["constraints/rc10-music.ucf"]
+
+[program]
+mode = "sram"
