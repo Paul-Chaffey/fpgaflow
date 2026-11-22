@@ -7,6 +7,8 @@ use fpgaflow_core::tools::{self, Stage};
 use fpgaflow_core::UserConfig;
 use fpgaflow_editor::Position;
 
+mod flow;
+
 #[derive(Parser)]
 #[command(
     name = "fpgaflow",
@@ -51,6 +53,28 @@ enum Cmd {
     },
     /// Open the user configuration (~/.config/fpgaflow/config.toml) in the configured editor.
     Config,
+    /// Lint the RTL (Verilator --lint-only, or Icarus if Verilator is absent).
+    Lint,
+    /// Compile and run the testbench.
+    Sim {
+        /// Override [sim] tool from fpgaflow.toml.
+        #[arg(long, value_parser = ["icarus", "verilator"])]
+        tool: Option<String>,
+        /// Open the waveform in GTKWave afterwards.
+        #[arg(long)]
+        waves: bool,
+    },
+    /// Open the last simulation's waveform in GTKWave.
+    Waves {
+        #[arg(long, value_parser = ["icarus", "verilator"])]
+        tool: Option<String>,
+    },
+    /// Elaborate the RTL with Yosys and print the module hierarchy and ports.
+    Hier {
+        /// Top module (default: [project] top, else Yosys picks).
+        #[arg(long)]
+        top: Option<String>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -75,6 +99,10 @@ fn main() -> Result<()> {
             println!("{}", path.display());
             Ok(())
         }
+        Cmd::Lint => flow::lint(&cli.dir, &cfg),
+        Cmd::Sim { tool, waves } => flow::sim(&cli.dir, &cfg, tool.as_deref(), waves),
+        Cmd::Waves { tool } => flow::waves(&cli.dir, &cfg, tool.as_deref()),
+        Cmd::Hier { top } => flow::hier(&cli.dir, &cfg, top),
     }
 }
 

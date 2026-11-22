@@ -1,3 +1,5 @@
+`timescale 1ns/1ps
+
 // Free-running counter; the LED shows its top bit.
 module blinky #(
     parameter int unsigned WIDTH = 25   // 50 MHz / 2^25 ~ 1.5 Hz toggle

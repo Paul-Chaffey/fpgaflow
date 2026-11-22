@@ -17,6 +17,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
 glob = "0.3"
+regex = "1"
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["process", "io-util", "rt-multi-thread", "macros", "sync", "time"] }
 tokio-util = "0.7"
@@ -29,3 +30,5 @@ tempfile = "3"
 
 fpgaflow-core = { path = "crates/core" }
 fpgaflow-editor = { path = "crates/editor" }
+fpgaflow-hdl = { path = "crates/hdl" }
+fpgaflow-sim = { path = "crates/sim" }

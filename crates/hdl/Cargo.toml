@@ -1,0 +1,16 @@
+[package]
+name = "fpgaflow-hdl"
+description = "HDL helpers for fpgaflow: diagnostics parsing, module scanning, Yosys design analysis"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+regex.workspace = true
+serde.workspace = true
+# preserve_order keeps Yosys port order, which testbench generation relies on.
+serde_json = { workspace = true, features = ["preserve_order"] }
+thiserror.workspace = true

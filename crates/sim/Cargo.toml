@@ -1,0 +1,21 @@
+[package]
+name = "fpgaflow-sim"
+description = "Simulation for fpgaflow: Icarus Verilog, Verilator, lint, GTKWave"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+fpgaflow-core.workspace = true
+fpgaflow-hdl.workspace = true
+regex.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

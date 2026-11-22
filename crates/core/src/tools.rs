@@ -349,7 +349,19 @@ pub fn host_checks() -> Vec<HostCheck> {
     .filter(|n| n.to_lowercase().contains("openfpgaloader"))
     .collect();
 
+    let lz4 = Path::new("/usr/include/lz4.h").is_file();
+
     vec![
+        HostCheck {
+            name: "lz4 headers",
+            ok: lz4,
+            detail: if lz4 {
+                "/usr/include/lz4.h present".into()
+            } else {
+                "missing: Verilator cannot write FST waveforms (VCD still works)".into()
+            },
+            fix: (!lz4).then(|| "sudo apt install liblz4-dev".into()),
+        },
         HostCheck {
             name: "plugdev group",
             ok: in_plugdev,

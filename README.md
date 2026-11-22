@@ -28,10 +28,21 @@ Verilog / SystemVerilog ─▶ Icarus | Verilator ─▶ GTKWave
 
 ## Status
 
-Early development. Done so far: the project model, tool discovery
-(`fpgaflow doctor`), the job runner and the editor launcher. Simulation,
-synthesis, P&R, programming, the GUI and the Claude integration are next. See
-[the plan](#roadmap).
+Early development. Working today, from the CLI:
+
+| Command | What it does |
+|---|---|
+| `fpgaflow doctor` | find every tool, show versions, check USB/udev and lz4 setup |
+| `fpgaflow init <dir>` | new project skeleton |
+| `fpgaflow lint` | Verilator `--lint-only -Wall` (Icarus fallback) |
+| `fpgaflow sim [--tool icarus\|verilator] [--waves]` | compile and run the self-checking testbench, PASS/FAIL verdict, optional GTKWave |
+| `fpgaflow waves` | open the last waveform in GTKWave with a saved or generated layout |
+| `fpgaflow hier` | Yosys elaboration: module hierarchy and port lists |
+| `fpgaflow edit [file] [--line N --col N]` | open in the configured editor (Kate by default) |
+
+Compiler errors from Icarus, Verilator and Yosys are reported as
+`file:line:col` diagnostics. Synthesis, P&R, programming, the GUI and the
+Claude integration are next.
 
 ## Quick start
 
@@ -81,7 +92,7 @@ mode = "sram"          # or "flash"
 ## Roadmap
 
 1. Skeleton: project model, Doctor, job runner, editor launcher, CLI *(done)*
-2. Simulation: Icarus and Verilator, GTKWave, clickable diagnostics
+2. Simulation: Icarus and Verilator, GTKWave, clickable diagnostics *(done)*
 3. Synthesis: Yosys for every supported family
 4. P&R and bitstream:
    - ISE 14.7 (Spartan-3AN) first
