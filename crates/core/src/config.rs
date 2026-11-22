@@ -25,6 +25,7 @@ impl Default for UserConfig {
             tool_paths: BTreeMap::new(),
             search_paths: vec![
                 home.join("tools/oss-cad-suite/bin"),
+                home.join("Xilinx/14.7/ISE_DS/ISE/bin/lin64"),
                 PathBuf::from("/opt/Xilinx/14.7/ISE_DS/ISE/bin/lin64"),
             ],
         }
