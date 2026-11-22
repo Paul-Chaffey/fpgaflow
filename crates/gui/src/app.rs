@@ -204,6 +204,10 @@ impl App {
             Some("problems") => Tab::Problems,
             Some("reports") => Tab::Reports,
             Some("device") => Tab::Device,
+            Some("floorplan") => {
+                app.device.start_floorplan();
+                Tab::Device
+            }
             Some("pins") => Tab::Pins,
             Some("boards") => Tab::Boards,
             Some("doctor") => Tab::Doctor,

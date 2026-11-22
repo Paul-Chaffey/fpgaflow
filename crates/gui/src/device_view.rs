@@ -223,6 +223,8 @@ pub struct DeviceView {
     /// A drawn region waiting for its module.
     pending: Option<Region>,
     pending_module: String,
+    /// In floorplan mode, still draw routing, the selected net and paths.
+    fp_overlays: bool,
 }
 
 impl Default for DeviceView {
@@ -247,6 +249,7 @@ impl Default for DeviceView {
             drag: None,
             pending: None,
             pending_module: String::new(),
+            fp_overlays: false,
         }
     }
 }
@@ -461,9 +464,22 @@ impl DeviceView {
         ui.separator();
         ui.horizontal(|ui| {
             ui.label(RichText::new("Floorplan").strong());
-            ui.checkbox(&mut self.floorplan, "edit")
-                .on_hover_text("Left-drag on the die to draw a region; right or middle drag pans");
+            let (label, tip) = if self.floorplan {
+                ("✔ Done", "Leave floorplan editing")
+            } else {
+                (
+                    "✏ Edit floorplan",
+                    "Draw regions on the die that confine modules",
+                )
+            };
+            if ui.button(label).on_hover_text(tip).clicked() {
+                self.floorplan = !self.floorplan;
+                self.drag = None;
+            }
         });
+        if self.floorplan {
+            ui.checkbox(&mut self.fp_overlays, "show routing and paths");
+        }
         let stats: Vec<Containment> = containment(&self.regions, p);
         let mut remove = None;
         for (k, r) in self.regions.iter().enumerate() {
@@ -589,9 +605,31 @@ impl DeviceView {
     }
 
     fn scene(&mut self, ui: &mut egui::Ui) {
+        if self.data.is_none() || self.geom.is_none() {
+            return;
+        }
+        let accent = Color32::from_rgb(255, 170, 40);
+        if self.floorplan {
+            egui::Frame::new()
+                .fill(accent.gamma_multiply(0.22))
+                .stroke(Stroke::new(1.0, accent))
+                .corner_radius(4.0)
+                .inner_margin(6.0)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("✏ Floorplan editing").strong().color(accent));
+                        ui.label("left-drag draws a region · right or middle drag pans · Ctrl+wheel zooms");
+                        if ui.button("✔ Done").clicked() {
+                            self.floorplan = false;
+                            self.drag = None;
+                        }
+                    });
+                });
+        }
         let (Some(l), Some(g)) = (self.data.clone(), self.geom.as_ref()) else {
             return;
         };
+        let overlays = !self.floorplan || self.fp_overlays;
         let dark = ui.visuals().dark_mode;
         let tile_col = |c: TileClass| -> Color32 {
             let (d, li) = match c {
@@ -661,6 +699,17 @@ impl DeviceView {
                 };
                 let resp = ui.allocate_rect(g.extent, sense);
                 hover_pos = resp.hover_pos();
+                if floorplan {
+                    ui.painter().rect_stroke(
+                        g.extent.expand(S * 0.4),
+                        2.0,
+                        Stroke::new(S * 0.25, accent),
+                        egui::StrokeKind::Outside,
+                    );
+                    if hover_pos.is_some() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+                    }
+                }
                 if resp.clicked() {
                     clicked = resp.hover_pos();
                 }
@@ -688,7 +737,7 @@ impl DeviceView {
                 for r in g.sites.values() {
                     painter.rect_filled(*r, 0.5, empty_site);
                 }
-                if self.show_heat {
+                if self.show_heat && overlays {
                     for (name, &n) in &g.density {
                         if let Some(r) = g.tile_by_name.get(name) {
                             let a = (n as f32 / g.max_density as f32).sqrt();
@@ -706,35 +755,49 @@ impl DeviceView {
                             continue;
                         }
                         if let Some(r) = g.inst_rects[i] {
-                            let c = g
+                            let mut c = g
                                 .colours
                                 .get(&inst.module)
                                 .copied()
                                 .unwrap_or(Color32::GRAY);
+                            if floorplan {
+                                // Dimmed, so the regions stand out.
+                                c = c.gamma_multiply(0.45);
+                            }
                             painter.rect_filled(r, 0.5, c);
                         }
                     }
-                    self.draw_selection(painter, p, g);
+                    if overlays {
+                        self.draw_selection(painter, p, g);
+                    }
                 }
                 // Floorplan regions, the region being drawn, and slices that
                 // the last build put outside their region.
                 for r in &self.regions {
                     if let Some(rr) = g.region_rect(r) {
                         let c = g.colours.get(&r.module).copied().unwrap_or(Color32::GRAY);
-                        painter.rect_filled(rr, 1.0, c.gamma_multiply(0.18));
+                        // Stronger while editing, when the placement is dimmed.
+                        let (fill, width, size) = if floorplan {
+                            (0.32, 3.0, S * 1.6)
+                        } else {
+                            (0.18, 1.5, S * 0.9)
+                        };
+                        painter.rect_filled(rr, 1.0, c.gamma_multiply(fill));
                         painter.rect_stroke(
                             rr,
                             1.0,
-                            Stroke::new(1.5, c),
+                            Stroke::new(width, c),
                             egui::StrokeKind::Outside,
                         );
-                        painter.text(
-                            rr.left_top() + Vec2::new(2.0, 2.0),
-                            egui::Align2::LEFT_TOP,
-                            &r.module,
-                            egui::FontId::proportional(S * 0.9),
+                        let label_pos = rr.left_top() + Vec2::new(3.0, 3.0);
+                        let font = egui::FontId::proportional(size);
+                        let galley = painter.layout_no_wrap(r.module.clone(), font, Color32::WHITE);
+                        painter.rect_filled(
+                            Rect::from_min_size(label_pos, galley.size()).expand(2.0),
+                            2.0,
                             c,
                         );
+                        painter.galley(label_pos, galley, Color32::WHITE);
                     }
                 }
                 for site in &outside {
@@ -760,7 +823,7 @@ impl DeviceView {
                     painter.rect_stroke(rr, 1.0, ghost, egui::StrokeKind::Outside);
                 }
 
-                if let Some(k) = self.selected_path {
+                if let Some(k) = self.selected_path.filter(|_| overlays) {
                     if let Some(path) = l.paths.get(k) {
                         let mut pts: Vec<Pos2> = Vec::new();
                         for s in &path.steps {
