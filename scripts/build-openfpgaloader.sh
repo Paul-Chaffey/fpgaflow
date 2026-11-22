@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Build openFPGALoader v1.2.0 with fpgaflow's part-table patch (XC3S700AN,
-# IDCODE 0x02628093 from ISE 14.7's BSDL) into ~/tools/openfpgaloader-fpgaflow.
+# Build openFPGALoader v1.2.0 with fpgaflow's part-table patch (XC3S700AN and
+# the Spartan-3 XC3S50…XC3S5000, IDCODEs from ISE 14.7 BSDL files) into
+# ~/tools/openfpgaloader-fpgaflow.
 #
 # Only the Xilinx Platform Cable USB driver and Xilinx FPGA support are built,
 # so the only build dependency beyond a C++ compiler and CMake is libusb-1.0.
@@ -20,8 +21,8 @@ if [ ! -d "${src}/.git" ]; then
     git clone --depth 1 --branch v1.2.0 https://github.com/trabucayre/openFPGALoader.git "${src}"
 fi
 cd "${src}"
-if git apply --check "${repo_dir}/third_party/openfpgaloader/0001-add-xc3s700an.patch" 2>/dev/null; then
-    git apply "${repo_dir}/third_party/openfpgaloader/0001-add-xc3s700an.patch"
+if git apply --check "${repo_dir}/third_party/openfpgaloader/0001-add-spartan3-parts.patch" 2>/dev/null; then
+    git apply "${repo_dir}/third_party/openfpgaloader/0001-add-spartan3-parts.patch"
 fi
 
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="${prefix}" \

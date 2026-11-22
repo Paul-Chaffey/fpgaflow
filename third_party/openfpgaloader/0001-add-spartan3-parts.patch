@@ -1,0 +1,24 @@
+diff --git a/src/part.hpp b/src/part.hpp
+index 6b28741..fb060fc 100644
+--- a/src/part.hpp
++++ b/src/part.hpp
+@@ -53,9 +53,19 @@ static std::map <uint32_t, fpga_model> fpga_list = {
+ 	{0x09616093, {"xilinx", "xc9500xl", "xc95288xl", 8}},
+ 
+ 	/* Xilinx Spartan3 */
++	/* fpgaflow: Spartan-3 IDCODEs from ISE 14.7 BSDL files (spartan3/data/xc3s*.bsd) */
++	{0x0140d093, {"xilinx", "spartan3",  "xc3s50",   6}},
+ 	{0x01414093, {"xilinx", "spartan3",  "xc3s200",  6}},
++	{0x0141c093, {"xilinx", "spartan3",  "xc3s400",  6}},
++	{0x01428093, {"xilinx", "spartan3",  "xc3s1000", 6}},
++	{0x01434093, {"xilinx", "spartan3",  "xc3s1500", 6}},
++	{0x01440093, {"xilinx", "spartan3",  "xc3s2000", 6}},
++	{0x01448093, {"xilinx", "spartan3",  "xc3s4000", 6}},
++	{0x01450093, {"xilinx", "spartan3",  "xc3s5000", 6}},
+ 	{0x11c1a093, {"xilinx", "spartan3e", "xc3s250e", 6}},
+ 	{0x01c22093, {"xilinx", "spartan3e", "xc3s500e", 6}},
++	/* fpgaflow: IDCODE from ISE 14.7 BSDL xc3s700an.bsd, verified on a Spartan-3AN Starter Kit */
++	{0x02628093, {"xilinx", "spartan3a", "xc3s700an", 6}},
+ 
+ 	/* Xilinx Spartan6 */
+ 	{0x04001093, {"xilinx", "spartan6", "xc6slx9",         6}},

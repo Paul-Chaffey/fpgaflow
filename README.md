@@ -77,7 +77,9 @@ are next.
    openFPGALoader's own rules have no entry for Xilinx cables (USB vendor `03fd`).
 3. **openFPGALoader with the XC3S700AN entry:** `scripts/build-openfpgaloader.sh`
    (stock v1.2.0 reads the IDCODE but has no part entry for it; submitted
-   upstream as [openFPGALoader#771](https://github.com/trabucayre/openFPGALoader/pull/771)). openFPGALoader
+   upstream as [openFPGALoader#771](https://github.com/trabucayre/openFPGALoader/pull/771)).
+   The same patch adds the original Spartan-3 parts XC3S50–XC3S5000 (IDCODEs
+   from ISE's BSDL files; stock v1.2.0 knows only the XC3S200). openFPGALoader
    loads the cable's FX2 firmware (`xusb_emb.hex` from ISE) itself; the cable
    then re-enumerates from `03fd:000d` to `03fd:0008`.
 4. `fpgaflow build && fpgaflow program`. The JTAG clock is 750 kHz: at 6 MHz
