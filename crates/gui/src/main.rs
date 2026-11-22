@@ -1,11 +1,22 @@
 //! fpgaflow desktop GUI.
 
 mod app;
+mod device_view;
 mod splash;
 mod worker;
 
 fn main() -> eframe::Result {
-    let start_dir = std::env::args().nth(1).map(std::path::PathBuf::from);
+    // fpgaflow-gui [PROJECT_DIR] [--tab NAME]
+    let mut start_dir = None;
+    let mut start_tab = None;
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        if a == "--tab" {
+            start_tab = args.next();
+        } else {
+            start_dir = Some(std::path::PathBuf::from(a));
+        }
+    }
     let mut viewport = eframe::egui::ViewportBuilder::default()
         .with_title("FPGA Flow")
         .with_app_id("fpgaflow")
@@ -22,6 +33,6 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "fpgaflow",
         options,
-        Box::new(move |cc| Ok(Box::new(app::App::new(cc, start_dir)))),
+        Box::new(move |cc| Ok(Box::new(app::App::new(cc, start_dir, start_tab.as_deref())))),
     )
 }

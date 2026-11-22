@@ -17,6 +17,7 @@ use fpgaflow_flow::boards::{self, Cable, Hotplug, Identity, UsbDevice};
 use fpgaflow_flow::BuildOutput;
 use tokio_util::sync::CancellationToken;
 
+use crate::device_view::{DeviceRequest, DeviceView};
 use crate::worker::{self, Action, Msg, Outcome, Slot, SynthView};
 
 const MAX_LOG_LINES: usize = 50_000;
@@ -27,6 +28,7 @@ enum Tab {
     Claude,
     Problems,
     Reports,
+    Device,
     Boards,
     Doctor,
     Settings,
@@ -126,11 +128,16 @@ pub struct App {
     doctor: Option<(Vec<ToolStatus>, Vec<HostCheck>)>,
     new_project: NewProjectForm,
     ai: AiPanel,
+    device: DeviceView,
     splash: crate::splash::Splash,
 }
 
 impl App {
-    pub fn new(cc: &eframe::CreationContext<'_>, start_dir: Option<PathBuf>) -> Self {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        start_dir: Option<PathBuf>,
+        start_tab: Option<&str>,
+    ) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
         let repaint = cc.egui_ctx.clone();
         let cfg = UserConfig::load().unwrap_or_default();
@@ -164,6 +171,7 @@ impl App {
             doctor: None,
             new_project: NewProjectForm::default(),
             ai: AiPanel::default(),
+            device: DeviceView::default(),
             splash: crate::splash::Splash::new(&cc.egui_ctx),
         };
         match worker::start_hotplug(app.repaint.clone(), app.tx.clone()) {
@@ -186,6 +194,24 @@ impl App {
         if let Ok(p) = Project::find(&dir) {
             app.set_project(p);
         }
+        app.tab = match start_tab.map(str::to_ascii_lowercase).as_deref() {
+            Some("log") | None => app.tab,
+            Some("claude") => Tab::Claude,
+            Some("problems") => Tab::Problems,
+            Some("reports") => Tab::Reports,
+            Some("device") => Tab::Device,
+            Some("boards") => Tab::Boards,
+            Some("doctor") => Tab::Doctor,
+            Some("settings") => Tab::Settings,
+            Some(other) => {
+                app.message = Some((false, format!("unknown tab {other:?}")));
+                app.tab
+            }
+        };
+        if app.tab != Tab::Log {
+            // Skip the splash when opening straight into a tab.
+            app.splash.close();
+        }
         app
     }
 
@@ -206,6 +232,7 @@ impl App {
         self.last_sim = None;
         self.last_synth = None;
         self.last_build = None;
+        self.device.clear();
         self.note(format!(
             "opened project {} ({})",
             p.file.project.name,
@@ -224,6 +251,24 @@ impl App {
             let excess = self.log.len() - MAX_LOG_LINES;
             self.log.drain(..excess);
         }
+    }
+
+    fn load_layout(&mut self) {
+        let Some(project) = self.project.clone() else {
+            return;
+        };
+        if self.device.loading {
+            return;
+        }
+        self.device.loading = true;
+        self.device.error = None;
+        worker::spawn_layout(
+            &self.rt,
+            self.repaint.clone(),
+            self.tx.clone(),
+            project,
+            self.cfg.clone(),
+        );
     }
 
     fn start(&mut self, action: Action) {
@@ -286,6 +331,12 @@ impl App {
                 ),
             },
             Msg::Done(action, result) => self.finish(action, result),
+            Msg::Layout(r) => {
+                if let Err(e) = &r {
+                    self.push_log(LineKind::Err, format!("layout: {e}"));
+                }
+                self.device.set_data(r);
+            }
             Msg::Hotplug(Hotplug::Added(d)) => {
                 let id = boards::identify(&d, &self.cables);
                 if id != Identity::Unknown {
@@ -367,6 +418,9 @@ impl App {
                     self.push_log(LineKind::Err, format!("build: {why}"));
                 }
                 let ok = b.ok;
+                if b.bitstream.is_some() || ok {
+                    self.device.stale = true;
+                }
                 self.last_build = Some(b);
                 ok
             }
@@ -718,6 +772,7 @@ impl App {
                 ),
                 (Tab::Problems, format!("Problems ({errors}E/{warns}W)")),
                 (Tab::Reports, "Reports".to_string()),
+                (Tab::Device, "Device".to_string()),
                 (
                     Tab::Boards,
                     format!(
@@ -740,6 +795,14 @@ impl App {
             Tab::Claude => self.ai_view(ui),
             Tab::Problems => self.problems_view(ui),
             Tab::Reports => self.reports_view(ui),
+            Tab::Device => {
+                if self.device.stale && !self.device.loading && self.running.is_none() {
+                    self.load_layout();
+                }
+                if let Some(DeviceRequest::Load) = self.device.ui(ui) {
+                    self.load_layout();
+                }
+            }
             Tab::Boards => self.boards_view(ui),
             Tab::Doctor => self.doctor_view(ui),
             Tab::Settings => self.settings_view(ui),

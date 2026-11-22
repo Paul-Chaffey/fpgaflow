@@ -35,6 +35,10 @@ impl Splash {
         }
     }
 
+    pub fn close(&mut self) {
+        self.open = None;
+    }
+
     /// Show it again until the user closes it (Help → About).
     pub fn show_about(&mut self) {
         self.open = Some(None);

@@ -88,6 +88,7 @@ pub struct AiResult {
 }
 
 pub enum Msg {
+    Layout(Result<std::sync::Arc<fpgaflow_flow::LayoutData>, String>),
     Ai(fpgaflow_flow::ai::AiEvent),
     AiDone(Result<AiResult, String>),
     Event(JobEvent),
@@ -152,6 +153,40 @@ pub fn spawn_action(
         drop(ctx); // closes the event channel so `forward` finishes
         let _ = forward.await;
         let _ = tx.send(Msg::Done(action, result.map_err(|e| format!("{e:#}"))));
+        repaint.request_repaint();
+    });
+}
+
+/// Load the device, package and last placement for the Device and Pins tabs.
+/// ISE runs (once per part, and after each build) report into the log.
+pub fn spawn_layout(
+    rt: &tokio::runtime::Runtime,
+    repaint: egui::Context,
+    tx: Sender<Msg>,
+    project: Project,
+    cfg: UserConfig,
+) {
+    rt.spawn(async move {
+        let (etx, mut erx) = tokio::sync::mpsc::unbounded_channel();
+        let (fwd_tx, fwd_repaint) = (tx.clone(), repaint.clone());
+        let forward = tokio::spawn(async move {
+            while let Some(ev) = erx.recv().await {
+                if fwd_tx.send(Msg::Event(ev)).is_err() {
+                    break;
+                }
+                fwd_repaint.request_repaint();
+            }
+        });
+        let ctx = Ctx {
+            events: etx,
+            cancel: CancellationToken::new(),
+        };
+        let r = fpgaflow_flow::layout(&project, &cfg, &ctx).await;
+        drop(ctx);
+        let _ = forward.await;
+        let _ = tx.send(Msg::Layout(
+            r.map(std::sync::Arc::new).map_err(|e| format!("{e:#}")),
+        ));
         repaint.request_repaint();
     });
 }
