@@ -16,6 +16,7 @@ use anyhow::{Context, Result};
 use fpgaflow_core::job::JobEvent;
 use fpgaflow_core::project::{Project, SimTool};
 use fpgaflow_core::stage::{self, Plan, Summary};
+use fpgaflow_core::status::{self, Step};
 use fpgaflow_core::{tools, UserConfig};
 use fpgaflow_hdl::design::{self, AnalyseRequest, Design};
 use fpgaflow_pnr::ise::{self, PadRow, Resource, Timing};
@@ -51,9 +52,25 @@ pub fn rel<'a>(project: &Project, p: &'a Path) -> &'a Path {
 
 // ------------------------------------------------------------------ lint & sim
 
+/// Remember a step's result in `build/status.json` (see [`status`]).
+fn remember<T>(
+    project: &Project,
+    step: Step,
+    r: &Result<T>,
+    ok: impl Fn(&T) -> (bool, Option<String>),
+) {
+    let (good, detail) = match r {
+        Ok(v) => ok(v),
+        Err(e) => (false, Some(format!("{e:#}").chars().take(120).collect())),
+    };
+    status::record(project, step, good, detail);
+}
+
 pub async fn lint(project: &Project, cfg: &UserConfig, ctx: &Ctx) -> Result<Summary> {
     let plan = fpgaflow_sim::plan_lint(project, cfg)?;
-    ctx.run(&plan).await
+    let r = ctx.run(&plan).await;
+    remember(project, Step::Lint, &r, |s| (s.ok, None));
+    r
 }
 
 pub async fn simulate(
@@ -64,7 +81,20 @@ pub async fn simulate(
 ) -> Result<Summary> {
     let plan = fpgaflow_sim::plan_sim(project, cfg, tool)?;
     ctx.note(format!("simulating with {tool:?}"));
-    ctx.run(&plan).await
+    let r = ctx.run(&plan).await;
+    remember(project, Step::Sim, &r, |s| {
+        let verdict = match s.verdict {
+            Some(stage::Verdict::Pass) => "PASS",
+            Some(stage::Verdict::Fail) => "FAIL",
+            _ => "no verdict",
+        };
+        let tool = match tool {
+            SimTool::Icarus => "icarus",
+            SimTool::Verilator => "verilator",
+        };
+        (s.ok, Some(format!("{tool}: {verdict}")))
+    });
+    r
 }
 
 /// Waveform file the last simulation with `tool` writes.
@@ -122,6 +152,18 @@ pub struct SynthOutput {
 }
 
 pub async fn synthesize(
+    project: &Project,
+    cfg: &UserConfig,
+    family: Option<&str>,
+    backend: Option<&str>,
+    ctx: &Ctx,
+) -> Result<SynthOutput> {
+    let r = synthesize_inner(project, cfg, family, backend, ctx).await;
+    remember(project, Step::Synth, &r, |s| (s.summary.ok, None));
+    r
+}
+
+async fn synthesize_inner(
     project: &Project,
     cfg: &UserConfig,
     family: Option<&str>,
@@ -190,6 +232,38 @@ impl BuildOutput {
     }
 }
 
+/// The last build's reports, read back from disk (for the Reports tab after
+/// a restart). `None` if no build has been recorded.
+pub fn last_build(project: &Project) -> Option<BuildOutput> {
+    let rec = status::load(project).remove(&Step::Build)?;
+    let bit = fpgaflow_program::default_bitstream(project);
+    let read = |ext: &str| std::fs::read_to_string(bit.with_extension(ext)).ok();
+    let mrp = std::fs::read_to_string(
+        bit.with_file_name(format!("{}_map.mrp", bit.file_stem()?.to_string_lossy())),
+    )
+    .ok();
+    let utilisation = std::fs::read_to_string(project.stage_dir("synth").join("stat.json"))
+        .ok()
+        .and_then(|t| Utilisation::from_stat_json(&t).ok());
+    Some(BuildOutput {
+        stages: Vec::new(),
+        ok: rec.ok,
+        failure: (!rec.ok).then(|| rec.detail.clone().unwrap_or_else(|| "failed".into())),
+        part: project
+            .file
+            .target
+            .as_ref()
+            .and_then(|t| fpgaflow_pnr::part_name(t).ok()),
+        utilisation,
+        resources: mrp.map(|t| ise::parse_map_report(&t)).unwrap_or_default(),
+        timing: read("twr").map(|t| ise::parse_timing_report(&t)),
+        pins: read("pad")
+            .map(|t| ise::parse_pad_report(&t))
+            .unwrap_or_default(),
+        bitstream: bit.is_file().then_some(bit),
+    })
+}
+
 /// Port bits of the design's top with no `LOC` in the project's UCFs.
 pub fn unconstrained_ports(project: &Project, design: &Design) -> Result<(String, Vec<String>)> {
     let top = design.top().context("Yosys found no top module")?.clone();
@@ -208,6 +282,24 @@ pub fn unconstrained_ports(project: &Project, design: &Design) -> Result<(String
 /// Synthesis → place & route → timing → bitstream, with the pin safety
 /// checks before synthesis and before bitgen.
 pub async fn build(
+    project: &Project,
+    cfg: &UserConfig,
+    opts: &BuildOptions,
+    ctx: &Ctx,
+) -> Result<BuildOutput> {
+    let r = build_inner(project, cfg, opts, ctx).await;
+    remember(project, Step::Build, &r, |b| {
+        let detail = match (&b.failure, b.timing.as_ref().and_then(|t| t.fmax_mhz)) {
+            (Some(why), _) => Some(why.clone()),
+            (None, Some(f)) => Some(format!("Fmax {f:.1} MHz")),
+            _ => None,
+        };
+        (b.ok, detail)
+    });
+    r
+}
+
+async fn build_inner(
     project: &Project,
     cfg: &UserConfig,
     opts: &BuildOptions,
@@ -331,7 +423,9 @@ pub async fn program(
         board.name
     ));
     let plan = fpgaflow_program::plan_program(project, cfg, &bit)?;
-    ctx.run(&plan).await
+    let r = ctx.run(&plan).await;
+    remember(project, Step::Program, &r, |s| (s.ok, None));
+    r
 }
 
 pub async fn detect(project: &Project, cfg: &UserConfig, ctx: &Ctx) -> Result<Summary> {

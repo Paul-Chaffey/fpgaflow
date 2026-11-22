@@ -310,6 +310,19 @@ fn info(dir: &Path) -> Result<()> {
         ),
         None => println!("Target   (none)"),
     }
+    let done = fpgaflow_core::status::current(&p);
+    if done.is_empty() {
+        println!("Done     nothing yet");
+    }
+    for (step, (state, rec)) in &done {
+        println!(
+            "Done     {step:?}: {state:?}{}",
+            rec.detail
+                .as_deref()
+                .map(|d| format!(" ({d})"))
+                .unwrap_or_default()
+        );
+    }
     let show = |label: &str, files: Vec<PathBuf>| {
         println!("{label} ({}):", files.len());
         for f in files {

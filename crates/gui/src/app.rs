@@ -237,6 +237,44 @@ impl App {
         self.last_sim = None;
         self.last_synth = None;
         self.last_build = None;
+        // What was already done for this project (from build/status.json):
+        // passed, failed, or stale because inputs changed since.
+        use fpgaflow_core::status::{self, Step, StepState};
+        let done = status::current(&p);
+        for (step, (state, rec)) in &done {
+            let slot = match step {
+                Step::Lint => Slot::Lint,
+                Step::Sim => Slot::Sim,
+                Step::Synth => Slot::Synth,
+                Step::Build => Slot::Build,
+                Step::Program => continue,
+            };
+            self.status.insert(
+                slot,
+                match state {
+                    StepState::Ok => Status::Ok,
+                    StepState::Failed => Status::Failed,
+                    StepState::Stale => Status::Stale,
+                },
+            );
+            let when = rec.finished_unix;
+            let what = match state {
+                StepState::Ok => "done",
+                StepState::Failed => "failed",
+                StepState::Stale => "done, sources changed since",
+            };
+            self.note(format!(
+                "previously: {slot:?} {what}{} ({})",
+                rec.detail
+                    .as_deref()
+                    .map(|d| format!(": {d}"))
+                    .unwrap_or_default(),
+                ago(when)
+            ));
+        }
+        if done.contains_key(&Step::Build) {
+            self.last_build = fpgaflow_flow::last_build(&p);
+        }
         self.device.clear();
         self.pins.clear();
         self.note(format!(
@@ -1638,6 +1676,21 @@ impl eframe::App for App {
 }
 
 // ------------------------------------------------------------ helpers
+
+/// "5 min ago" style age of a Unix time.
+fn ago(unix: u64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(unix);
+    let s = now.saturating_sub(unix);
+    match s {
+        0..=59 => "just now".into(),
+        60..=3599 => format!("{} min ago", s / 60),
+        3600..=86_399 => format!("{} h ago", s / 3600),
+        _ => format!("{} days ago", s / 86_400),
+    }
+}
 
 fn status_mark(s: Status) -> (&'static str, Color32) {
     match s {
