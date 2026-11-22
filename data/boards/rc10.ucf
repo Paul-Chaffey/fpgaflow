@@ -13,7 +13,9 @@
 #   bank 0  VccADC: +1.2 V through L5 (measured 1.2 V at C33 on this board)
 #           (VGA colour pins)                    -> LVCMOS12, 2/4/6 mA drive only
 #   bank 1,2  ATAv, set by jumper JP2: 1-2 = +3.3 V, 2-3 = +2.5 V
-#           (expansion header, expansion clocks, joystick, LCD; LVCMOS33 assumes 1-2)
+#           (measured 3.3 V at JP2 pin 2 on this board)
+#           (expansion header, expansion clocks, joystick, LCD) -> LVCMOS33;
+#           if you move JP2 to 2-3, change these pins to LVCMOS25
 #   bank 3  +2.5 V  (camera, ADC control)       -> LVCMOS25
 #   bank 4,5  +3.3 V  (48 MHz clock, PS/2, FX2, RS-232, audio, VGA sync, CAN,
 #           servos)                              -> LVCMOS33
