@@ -129,6 +129,16 @@ module tb_pcm_player;
             $display("DAC: density %.4f, expected %.4f", got, want);
             if (got - want > 0.002 || want - got > 0.002) begin $display("FAIL: DAC density"); errors++; end
         end
+        // And the right channel, from the last right sample.
+        begin
+            ones = 0;
+            x = real'($signed(last[31:16])) * 82.0 / 256.0;
+            want = 0.5 + x / 65536.0;
+            repeat (n) begin @(posedge clk); ones += audio_r; end
+            got = real'(ones) / n;
+            $display("DAC right: density %.4f, expected %.4f", got, want);
+            if (got - want > 0.002 || want - got > 0.002) begin $display("FAIL: right DAC density"); errors++; end
+        end
 
         if (errors == 0) $display("PASS");
         else $display("FAIL: %0d errors", errors);
