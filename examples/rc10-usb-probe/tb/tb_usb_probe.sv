@@ -6,7 +6,7 @@ module tb_usb_probe;
     logic clk = 0;
     always #10.4167 clk = ~clk;
 
-    logic ncs = 1, nwr = 1;
+    logic ncs = 1, nwr = 1, seln = 0;
     logic [7:0] d_drv;
     logic d_oe = 0;
     wire  [7:0] d;
@@ -15,7 +15,7 @@ module tb_usb_probe;
     logic [4:0] joy = '0;
     logic [7:0] led, seg0, seg1;
 
-    usb_probe dut (.clk, .fx2_ncs(ncs), .fx2_nwr(nwr), .fx2_d(d), .fx2_full(full),
+    usb_probe dut (.clk, .fx2_ncs(ncs), .fx2_nwr(nwr), .fx2_seln(seln), .fx2_d(d), .fx2_full(full),
                    .fx2_empty(empty), .joy, .led, .seg0, .seg1);
 
     int errors = 0;
@@ -59,6 +59,15 @@ module tb_usb_probe;
         repeat (5) @(posedge clk);
         gpif_write(100, 3);
         gpif_write(28, 200);
+        // A flash read and write (SELn high): the FPGA must neither drive D
+        // nor count anything.
+        seln = 1;
+        gpif_write(50, 9);
+        gpif_read(64);
+        foreach (r[i]) if (r[i] !== 8'bz) begin
+            $display("FAIL: FPGA drove D during a flash read (byte %0d = %h)", i, r[i]); errors++; break;
+        end
+        seln = 0;
         gpif_read(512);
         // The counter part: consecutive values, no X, no gaps.
         for (int i = 1; i < 100; i++)

@@ -13,7 +13,9 @@ streaming audio to the board.
   nWR low counts as one byte. The display shows the count (low byte, hex), the
   LEDs count read bursts; the joystick centre clears both.
 
-The design never holds FULL or EMPTY, and drives D only while the FX2 reads.
+The design never holds FULL or EMPTY. It drives D only while the FX2 reads from
+the FPGA: nCS low, nWR high and SELn (GPIF2, P13) low. With SELn high the FX2
+is using the same bus for the NAND flash.
 
 ```sh
 fpgaflow -C examples/rc10-usb-probe build

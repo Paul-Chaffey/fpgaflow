@@ -112,6 +112,7 @@ Celoxica's).
 | CTL2 | GPIF0 | T14 | nCS: FPGA data strobe |
 | CTL1 | P3 | V4 | nWR: low = FX2 writes; also the flash strobe decoder (74LV139 A1) |
 | CTL0 | P2 | (SelectMAP CS_B) | configuration chip select |
+| PA5 | GPIF2 | P13 | **target select: 0 = FPGA, 1 = NAND flash** (firmware sets it before every GPIF transfer) |
 | RDY0 | FF0 | P14 | "EMPTY": FPGA has nothing to send |
 | RDY1 | FF1 | R14 | "FULL": FPGA can't take more |
 | IFCLK | CLK48 | P10 | 48 MHz, driven by the FX2 |
@@ -128,8 +129,16 @@ FIFO read: S0 done if RDY0; S1 `011` for 3 IFCLK; S2 `011` decision; S3
 `011` DATA (one sample per IFCLK, re-executed) until RDY0 or the EP6 flag
 (the programmable flag is set to the requested count); S6 `111` DATA + NEXT.
 
-Single write / single read (`101`: CTL1 low only) strobe the NAND flash
-through the 74LV139; nCS stays high, so the FPGA is not involved.
+Flash reads use the same FIFO read waveform, nCS low included, with GPIF2
+high. **A design on this bus must only respond while GPIF2 (P13) is low**;
+otherwise it drives D[7:0] against the NAND during flash reads. (The first
+probe build ignored GPIF2 and did exactly that during a flash read on
+2026-11-23: a few milliseconds of contention, the flash data read then was
+garbage. Reads don't change the NAND; a later backup read twice matched.)
+
+The firmware ends an EP6 reply that fills whole 512-byte packets with a
+zero-length packet. A host that doesn't consume it reads it as the start of
+the next reply.
 
 Measured with `examples/rc10-usb-probe` on 2026-11-23:
 

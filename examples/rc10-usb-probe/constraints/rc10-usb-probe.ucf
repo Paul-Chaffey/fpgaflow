@@ -3,7 +3,7 @@
 NET "clk" LOC = "P10" | IOSTANDARD = LVCMOS33 ;
 NET "clk" PERIOD = 20.833ns HIGH 50%;
 # FX2 GPIF bus (banks 4/5, 3.3 V). D[7:0] is shared with the NAND flash; the
-# design drives it only while nCS is low and nWR high.
+# design drives it only while nCS and SELn are low and nWR high.
 NET "fx2_d<7>"  LOC = "U13" | IOSTANDARD = LVCMOS33 ;
 NET "fx2_d<6>"  LOC = "T11" | IOSTANDARD = LVCMOS33 ;
 NET "fx2_d<5>"  LOC = "P12" | IOSTANDARD = LVCMOS33 ;
@@ -14,6 +14,7 @@ NET "fx2_d<1>"  LOC = "R8"  | IOSTANDARD = LVCMOS33 ;
 NET "fx2_d<0>"  LOC = "R6"  | IOSTANDARD = LVCMOS33 ;
 NET "fx2_ncs"   LOC = "T14" | IOSTANDARD = LVCMOS33 ;   # GPIF CTL2
 NET "fx2_nwr"   LOC = "V4"  | IOSTANDARD = LVCMOS33 ;   # GPIF CTL1
+NET "fx2_seln"  LOC = "P13" | IOSTANDARD = LVCMOS33 ;   # GPIF2 = FX2 PA5: 0 = FPGA, 1 = flash
 NET "fx2_full"  LOC = "R14" | IOSTANDARD = LVCMOS33 ;   # GPIF RDY1
 NET "fx2_empty" LOC = "P14" | IOSTANDARD = LVCMOS33 ;   # GPIF RDY0
 # Joystick, LEDs, 7-segment (as in rc10-music)

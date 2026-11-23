@@ -286,17 +286,37 @@ impl Board {
         self.read_exact_within(n, FLASH_TIMEOUT)
     }
 
+    /// The firmware ends a reply that fills whole 512-byte packets with a
+    /// zero-length packet. It is consumed here: left on the endpoint it would
+    /// be read as the start of the next reply, and abandoning that reply
+    /// leaves the firmware sending the rest of it.
     fn read_exact_within(&self, n: usize, timeout: Duration) -> Result<Vec<u8>, Error> {
         let mut out = Vec::with_capacity(n);
         // Buffers are whole 512-byte packets so a full packet never overflows.
         let mut buf = vec![0u8; n.div_ceil(512).max(1) * 512];
+        let mut empty = 0;
         while out.len() < n {
             let want = (n - out.len()).div_ceil(512) * 512;
             let got = self.handle.read_bulk(EP_IN, &mut buf[..want], timeout)?;
             if got == 0 {
-                return Err(Error::Usb(rusb::Error::Io));
+                // A stray terminator from an earlier reply: skip it.
+                empty += 1;
+                if !out.is_empty() || empty > 2 {
+                    return Err(Error::Usb(rusb::Error::Io));
+                }
+                continue;
             }
             out.extend_from_slice(&buf[..got.min(n - out.len())]);
+        }
+        if n % 512 == 0 {
+            match self
+                .handle
+                .read_bulk(EP_IN, &mut buf[..512], Duration::from_millis(200))
+            {
+                Ok(0) | Err(rusb::Error::Timeout) => {}
+                Ok(_) => return Err(Error::Usb(rusb::Error::Overflow)),
+                Err(e) => return Err(e.into()),
+            }
         }
         Ok(out)
     }

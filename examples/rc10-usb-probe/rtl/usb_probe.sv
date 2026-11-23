@@ -5,6 +5,9 @@
 // The FX2 is the bus master and its IFCLK is the FPGA's 48 MHz clock:
 //   nCS low, nWR low   the FX2 drives a byte on D for the FPGA (host -> FPGA)
 //   nCS low, nWR high  the FX2 samples D (FPGA -> host)
+// but only while SELn (GPIF2, FX2 PA5) is low. The same waveforms read and
+// write the NAND flash with SELn high; D[7:0] is shared, so the FPGA must
+// ignore those and never drive D then.
 //   FULL (RDY1) high   the FPGA can't take more; EMPTY (RDY0) high: nothing to read
 // The probe never asserts FULL or EMPTY.
 //
@@ -21,6 +24,7 @@ module usb_probe (
     input  logic       clk,        // 48 MHz IFCLK from the FX2
     input  logic       fx2_ncs,    // T14, GPIF CTL2
     input  logic       fx2_nwr,    // V4,  GPIF CTL1
+    input  logic       fx2_seln,   // P13, GPIF2 (FX2 PA5): 0 = FPGA, 1 = flash
     inout  wire  [7:0] fx2_d,
     output logic       fx2_full,   // R14, GPIF RDY1
     output logic       fx2_empty,  // P14, GPIF RDY0
@@ -33,7 +37,7 @@ module usb_probe (
     logic       ncs_q = 1'b1, ncs_q2 = 1'b1, nwr_q = 1'b1;
     logic [7:0] d_q = '0;
     always_ff @(posedge clk) begin
-        ncs_q  <= fx2_ncs;
+        ncs_q  <= fx2_ncs | fx2_seln;   // a cycle for the flash is no cycle for us
         ncs_q2 <= ncs_q;
         nwr_q  <= fx2_nwr;
         d_q    <= fx2_d;
