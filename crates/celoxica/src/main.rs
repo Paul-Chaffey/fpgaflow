@@ -148,7 +148,9 @@ struct PlayerStatus {
     underruns: u16,
     missed: u16,
     dropped: u16,
-    late_max: u16,
+    late_max: u8,
+    /// Sample rate the player's DACs run at.
+    rate: u32,
     fill: u8,
     idle: bool,
     paused: bool,
@@ -159,7 +161,7 @@ struct PlayerStatus {
 
 fn player_status(b: &fpgaflow_celoxica::Board) -> Result<PlayerStatus, Error> {
     let s = b.usb_read(16, Duration::from_secs(2))?;
-    if &s[0..2] != b"P1" {
+    if &s[0..2] != b"P2" {
         return Err(Error::Other(
             "the RC10 isn't running the PCM player: load \
              examples/rc10-pcm-player/build/impl/pcm_player.bit first"
@@ -172,7 +174,9 @@ fn player_status(b: &fpgaflow_celoxica::Board) -> Result<PlayerStatus, Error> {
         underruns: u16_at(6),
         missed: u16_at(8),
         dropped: u16_at(10),
-        late_max: u16_at(12),
+        late_max: s[12],
+        // 2 is 44.16 kHz (one DCM); the stream is still made at 44.1 kHz.
+        rate: if s[13] == 0 { 48_000 } else { 44_100 },
         fill: s[14],
         idle: s[15] & 0x80 != 0,
         paused: s[15] & 0x40 != 0,
@@ -198,11 +202,11 @@ fn wait_player(
     }
 }
 
-/// Decode an audio file with ffmpeg to 48 kHz 16-bit stereo and stream it to
-/// examples/rc10-pcm-player. The player paces the stream with FULL.
+/// Decode an audio file with ffmpeg to 16-bit stereo at the player's rate
+/// and stream it to examples/rc10-pcm-player. The player paces the stream
+/// with FULL.
 fn play(file: &str) -> Result<(), Error> {
     use std::io::Read;
-    const RATE: u64 = 48_000 * 4; // bytes per second
     let b = open()?;
     // Wait for any earlier stream to finish playing and end, so this one
     // starts on a sample boundary with fresh counts.
@@ -212,6 +216,9 @@ fn play(file: &str) -> Result<(), Error> {
             "the player is still busy with another stream".into(),
         ));
     }
+    let rate = s.rate;
+    let bytes_per_s = rate as u64 * 4;
+    let rate_arg = rate.to_string();
     let mut ff = std::process::Command::new("ffmpeg")
         .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-i", file])
         .args([
@@ -223,14 +230,17 @@ fn play(file: &str) -> Result<(), Error> {
             "-ac",
             "2",
             "-ar",
-            "48000",
+            &rate_arg,
             "pipe:1",
         ])
         .stdout(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| Error::Other(format!("can't run ffmpeg: {e}")))?;
     let mut out = ff.stdout.take().expect("piped");
-    println!("playing {file} (48 kHz stereo); volume and pause on the joystick");
+    println!(
+        "playing {file} ({} Hz stereo); volume and pause on the joystick",
+        rate
+    );
     let mut buf = vec![0u8; 64 * 1024];
     let mut sent: u64 = 0;
     let mut shown = Instant::now();
@@ -253,7 +263,7 @@ fn play(file: &str) -> Result<(), Error> {
         if shown.elapsed() >= Duration::from_secs(1) {
             shown = Instant::now();
             let s = player_status(&b)?;
-            let t = sent / RATE;
+            let t = sent / bytes_per_s;
             print!(
                 "\r  {:>2}:{:02}  buffer {:>3}%  volume {:>2}  DAC {}{}  underruns {}   ",
                 t / 60,
@@ -275,7 +285,7 @@ fn play(file: &str) -> Result<(), Error> {
         .map_err(|e| Error::Other(format!("ffmpeg: {e}")))?;
     // Let the buffer play out (85 ms when full), then report.
     let s = wait_player(&b, Duration::from_secs(2), |s| s.empty)?;
-    let t = sent / RATE;
+    let t = sent / bytes_per_s;
     println!(
         "\r  {}:{:02} played, {} bytes; FPGA received {} bytes, {} underrun(s) ({} samples), \
          {} dropped, at most {} bytes after FULL",

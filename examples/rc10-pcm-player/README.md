@@ -19,18 +19,24 @@ Plug headphones or powered speakers into the RC10's audio output.
 | left / right | DAC output coding: return-to-zero (LED 1, default) or NRZ (LED 0) |
 | centre | pause (the dot lights; the PC waits) |
 
-LEDs 4-7 show how full the 85 ms buffer is.
+LEDs 4-7 show how full the 93 ms buffer is.
 
 ## How it works
 
-- `play` runs ffmpeg to decode the file to 48 kHz 16-bit stereo and sends it
-  on USB bulk OUT (alternate setting 2; see `docs/rc10/usb-protocol.md`).
+- `play` runs ffmpeg to decode the file to 16-bit stereo at the player's
+  rate (44.1 kHz; read from its status) and sends it on USB bulk OUT
+  (alternate setting 2; see `docs/rc10/usb-protocol.md`).
+- Two clocks. The USB side runs on the FX2's 48 MHz. The DACs run on
+  44.1 MHz exactly, made from it by two DCMs (48 x 21/20 x 7/8;
+  `audio_clock`), one sample every 1000 clocks. Samples cross in a dual-clock
+  FIFO with Gray-coded pointers (`async_fifo`). A single DCM (48 x 23/25 =
+  44.16 MHz) also sounded clean; `AUDIO_CLK` selects "A", "B" or "48".
 - The FX2 hands each byte to the FPGA over its GPIF bus. `fx2_bus` takes
   them (only while GPIF2 selects the FPGA rather than the NAND flash), and
-  four bytes make a sample in a 4096-sample block-RAM FIFO (`sample_fifo`).
+  four bytes make a sample in a 4096-sample block-RAM FIFO.
 - FULL (the FX2's RDY1) goes high with 512 bytes still free, so the FPGA
   paces the PC: USB just waits.
-- Every 1000 clocks (48 kHz) a sample is played: scaled by the volume (one
+- Every 1000 DAC clocks (44.1 kHz) a sample is played: scaled by the volume (one
   MULT18X18 per channel, top step 0.9 of full scale) and fed to a
   second-order sigma-delta DAC per channel (`sigma_delta2`) into the board's
   RC filter (150 R, 0.1 uF, then 220 uF to the jack). Modelled at ~100 dB in
@@ -54,7 +60,8 @@ LEDs 4-7 show how full the 85 ms buffer is.
 |---|---|
 | `pcm_player` | top: bytes to samples, FIFO control, playback, volume, status, display |
 | `fx2_bus` | the FX2 GPIF bus: bytes in, status out, idle detection |
-| `sample_fifo` | 4096 x 32-bit FIFO in block RAM |
+| `async_fifo` | 4096 x 32-bit dual-clock FIFO in block RAM |
+| `audio_clock` | the DACs' clock: 44.1 MHz from two DCMs |
 | `sigma_delta2` | 2nd-order 1-bit DAC |
 | `controls` | joystick: volume and pause |
 

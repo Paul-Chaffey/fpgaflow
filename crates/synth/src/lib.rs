@@ -146,6 +146,11 @@ pub fn script(r: &ScriptRequest<'_>) -> String {
         read.push(' ');
         read.push_str(&q(f));
     }
+    // Vendor primitives the design instantiates (BUFG, DCM …) must exist for
+    // `hierarchy -check`; the family's synth command reads the full models.
+    for l in r.family.primitive_libs() {
+        s.push_str(&format!("read_verilog -lib {l}\n"));
+    }
     s.push_str(&read);
     s.push('\n');
 
@@ -302,6 +307,8 @@ mod tests {
         assert_eq!(
             body(&s),
             [
+                "read_verilog -lib +/xilinx/cells_sim.v",
+                "read_verilog -lib +/xilinx/cells_xtra.v",
                 r#"read_verilog -sv "/p/rtl/a.sv""#,
                 "hierarchy -check -top top",
                 "synth_xilinx -family xc3sa -ise -top top -flatten",

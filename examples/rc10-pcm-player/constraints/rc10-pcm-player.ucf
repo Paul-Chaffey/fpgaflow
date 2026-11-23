@@ -51,3 +51,7 @@ NET "audio_l" LOC = "U4" | IOSTANDARD = LVCMOS33 ;
 NET "audio_r" LOC = "V5" | IOSTANDARD = LVCMOS33 ;
 NET "piezo<0>" LOC = "U6" | IOSTANDARD = LVCMOS33 ;
 NET "piezo<1>" LOC = "V7" | IOSTANDARD = LVCMOS33 ;
+# Clock-domain crossings: paths into the first synchroniser flip-flops
+# (names ending _s1) go between the 48 MHz and DAC clocks and are not timed.
+INST "*_s1*" TNM = "SYNC_FIRST";
+TIMESPEC "TS_sync" = TO "SYNC_FIRST" TIG;

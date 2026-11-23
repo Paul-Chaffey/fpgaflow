@@ -100,6 +100,12 @@ exactly (1500 and 1000). 44.1 kHz does not:
 The choice is made by listening early, in milestone 0: the PCM player with
 the DACs on a DCM clock, playing a 44.1 kHz stream unresampled.
 
+**Decided 2026-11-23: A.** Both A and B played music and test tones with no
+audible hiss (RZ output). A is exact, so it is used. The PCM player now runs
+its DACs on it (`audio_clock.sv`, dual-clock FIFO from the USB side). 32 and
+48 kHz streams will need either a clock switch (BUFGMUX between the FX2's 48
+MHz and the DCMs) or resampling; that is decided in milestone 6.
+
 ## Verification
 
 1. **Golden model.** A Rust crate, `crates/mp3model`, that decodes the way

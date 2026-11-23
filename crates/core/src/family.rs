@@ -71,6 +71,16 @@ impl Family {
     pub fn default_backend(&self) -> &str {
         &self.backends[0]
     }
+
+    /// Yosys's primitive libraries for this vendor (clock buffers, DCMs,
+    /// PLLs …), to read as black boxes so `hierarchy -check` accepts designs
+    /// that instantiate them.
+    pub fn primitive_libs(&self) -> &'static [&'static str] {
+        match self.vendor.as_str() {
+            "xilinx" => &["+/xilinx/cells_sim.v", "+/xilinx/cells_xtra.v"],
+            _ => &[],
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]

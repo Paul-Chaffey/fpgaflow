@@ -130,15 +130,46 @@ pub fn analyse(project: &Project, cfg: &UserConfig, top: Option<String>) -> Resu
         defines: project.file.sources.defines.clone(),
         top: top.or_else(|| project.file.project.top.clone()),
         slang: false,
+        libs: primitive_libs(project),
     };
     match design::analyse(&yosys, &req, &project.stage_dir("analyse")) {
         Ok(d) => Ok(d),
-        Err(design::DesignError::Yosys { diagnostics, .. }) => {
-            let first: Vec<String> = diagnostics.iter().take(3).map(|d| d.to_string()).collect();
+        Err(design::DesignError::Yosys { diagnostics, log }) => {
+            // Errors first; Yosys's own "ERROR:" line carries no file:line.
+            let mut first: Vec<String> = diagnostics
+                .iter()
+                .filter(|d| d.severity == fpgaflow_core::diag::Severity::Error)
+                .take(3)
+                .map(|d| d.to_string())
+                .collect();
+            if first.is_empty() {
+                first.extend(
+                    log.lines()
+                        .filter(|l| l.starts_with("ERROR:"))
+                        .take(1)
+                        .map(|l| l.trim_start_matches("ERROR:").trim().to_string()),
+                );
+            }
+            if first.is_empty() {
+                first = diagnostics.iter().take(3).map(|d| d.to_string()).collect();
+            }
             anyhow::bail!("Yosys could not elaborate the design: {}", first.join("; "))
         }
         Err(e) => Err(e.into()),
     }
+}
+
+/// Vendor primitive libraries for the project's family, read as black boxes
+/// during analysis (synthesis reads its own).
+fn primitive_libs(project: &Project) -> Vec<String> {
+    project
+        .file
+        .target
+        .as_ref()
+        .and_then(|t| t.family.as_deref())
+        .and_then(fpgaflow_core::family::family)
+        .map(|f| f.primitive_libs().iter().map(|l| l.to_string()).collect())
+        .unwrap_or_default()
 }
 
 // ------------------------------------------------------------------ synthesis

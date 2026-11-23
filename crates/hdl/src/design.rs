@@ -158,6 +158,10 @@ pub struct AnalyseRequest {
     pub top: Option<String>,
     /// Use the yosys-slang frontend (`read_slang`) for full SystemVerilog.
     pub slang: bool,
+    /// Vendor primitive libraries (Yosys paths such as `+/xilinx/cells_xtra.v`)
+    /// read as black boxes first, so designs that instantiate a DCM, PLL or
+    /// clock buffer elaborate.
+    pub libs: Vec<String>,
 }
 
 fn quote(p: &Path) -> String {
@@ -185,8 +189,19 @@ pub fn analyse_script(req: &AnalyseRequest, json_out: &Path) -> String {
         Some(t) => format!("hierarchy -check -top {t}"),
         None => "hierarchy -check -auto-top".to_string(),
     };
+    // Some vendor cells are white boxes even under -lib (their models have
+    // processes, which write_json refuses): make every library cell a black
+    // box before the design is read.
+    let mut libs: String = req
+        .libs
+        .iter()
+        .map(|l| format!("read_verilog -lib {l}; "))
+        .collect();
+    if !libs.is_empty() {
+        libs.push_str("blackbox =*; ");
+    }
     // `proc` converts processes to netlist form; write_json refuses them otherwise.
-    format!("{read}; {hier}; proc; write_json {}", quote(json_out))
+    format!("{libs}{read}; {hier}; proc; write_json {}", quote(json_out))
 }
 
 /// Run Yosys to elaborate the design and return its hierarchy and ports.
@@ -278,11 +293,18 @@ mod tests {
             defines: [("W".to_string(), "8".to_string())].into(),
             top: Some("top".into()),
             slang: false,
+            libs: vec![],
         };
         let s = analyse_script(&req, Path::new("/p/build/d.json"));
         assert_eq!(
             s,
             r#"read_verilog -sv -I "/p/inc" -DW=8 "/p/rtl/a b.sv"; hierarchy -check -top top; proc; write_json "/p/build/d.json""#
         );
+        let req = AnalyseRequest {
+            libs: vec!["+/xilinx/cells_xtra.v".into()],
+            ..req
+        };
+        assert!(analyse_script(&req, Path::new("/d.json"))
+            .starts_with("read_verilog -lib +/xilinx/cells_xtra.v; blackbox =*; read_verilog -sv"));
     }
 }

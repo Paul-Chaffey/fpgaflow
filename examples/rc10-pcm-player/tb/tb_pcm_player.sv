@@ -21,7 +21,7 @@ module tb_pcm_player;
     logic [4:0] joy = '0;
     logic [7:0] led, seg0, seg1;
 
-    pcm_player #(.TICK(TICK), .AW(AW), .MARGIN(MARGIN), .IDLE_BITS(IDLE_BITS), .MS(4)) dut (
+    pcm_player #(.AUDIO_CLK("A"), .TICK(TICK), .AW(AW), .MARGIN(MARGIN), .IDLE_BITS(IDLE_BITS), .MS(4)) dut (
         .clk, .fx2_ncs(ncs), .fx2_nwr(nwr), .fx2_seln(seln), .fx2_d(d), .fx2_full(full),
         .fx2_empty(empty), .joy, .led, .seg0, .seg1, .audio_l, .audio_r, .piezo);
 
@@ -73,7 +73,7 @@ module tb_pcm_player;
 
     // Samples as played.
     logic [31:0] played[$];
-    always @(posedge clk) if (dut.re) played.push_back(dut.rdata);
+    always @(posedge dut.aclk) if (dut.re) played.push_back(dut.rdata);
 
     int k, ones, n;
     initial begin
@@ -109,14 +109,14 @@ module tb_pcm_player;
 
         fx2_read(16);
         flags = r[15];
-        $display("status: %s%s bytes %0d underruns %0d missed %0d dropped %0d late max %0d fill %0d flags %h",
+        $display("status: %s%s bytes %0d underruns %0d missed %0d dropped %0d late max %0d rate %0d fill %0d flags %h",
                  string'(r[0]), string'(r[1]), {r[5], r[4], r[3], r[2]}, {r[7], r[6]}, {r[9], r[8]},
-                 {r[11], r[10]}, {r[13], r[12]}, r[14], r[15]);
-        if (r[0] != "P" || r[1] != "1" || {r[5], r[4], r[3], r[2]} != 4 * WORDS
+                 {r[11], r[10]}, r[12], r[13], r[14], r[15]);
+        if (r[0] != "P" || r[1] != "2" || r[13] != 1 || {r[5], r[4], r[3], r[2]} != 4 * WORDS
             || {r[11], r[10]} != 0 || r[14] != 0 || flags != 8'hBE) begin
             $display("FAIL: status"); errors++;
         end
-        if ({r[13], r[12]} == 0) begin $display("FAIL: FULL was never exercised"); errors++; end
+        if (r[12] == 0) begin $display("FAIL: FULL was never exercised"); errors++; end
 
         // The DACs, in both codings: average output = 1/2 + x/2^17 with
         // x = sample * gain/256 (volume step 14: gain 163). RZ is the default;
@@ -132,7 +132,7 @@ module tb_pcm_player;
                 ones = 0; n = 65536;
                 x = real'($signed(ch == 0 ? last[15:0] : last[31:16])) * 163.0 / 256.0;
                 want = 0.5 + x / 131072.0;
-                repeat (n) begin @(posedge clk); ones += (ch == 0 ? audio_l : audio_r); end
+                repeat (n) begin @(posedge dut.aclk); ones += (ch == 0 ? audio_l : audio_r); end
                 got = real'(ones) / n;
                 $display("DAC %s %s: average %.4f, expected %.4f", mode == 0 ? "RZ " : "NRZ",
                          ch == 0 ? "left " : "right", got, want);
