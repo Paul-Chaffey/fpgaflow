@@ -7,7 +7,8 @@
 // Per frame from the front end (`side`, layout in mp3_frontend.sv), for each
 // granule and channel:
 //   - part 2: scale factors (long, short or mixed layout; scfsi reuses
-//     granule 0's long ones), into sfl[0..21] and sfs[3 * band + window]
+//     granule 0's long ones), into a small RAM: 0..21 long, 22 + 3 * band +
+//     window short; a mask marks the ones written (the rest are 0)
 //   - part 3: big-value pairs (three regions, table per region, linbits,
 //     signs) then count1 quadruples until part2_3_length bits are used (a
 //     quadruple that runs past the end is dropped), zero to 576
@@ -36,7 +37,8 @@ module mp3_granule (
     wire  [1:0]   rate     = hdr[11:10];
 
     logic gr = 1'b0, ch = 1'b0;
-    wire  [73:0] ent = fr[74 * {gr, ch} +: 74];
+    // This granule's side info, latched when it starts (G_SEEK).
+    logic [73:0] ent = '0;
     wire  [11:0] p23  = ent[73:62];
     wire  [8:0]  bv   = ent[61:53];
     wire  [3:0]  sfc  = ent[44:41];
@@ -54,9 +56,8 @@ module mp3_granule (
     wire  [5:0] r12 = 6'(r0) + r1 + 6'd2;
     mp3_sfb_long u_sfb1 (.rate, .idx(5'(r0) + 5'd1), .edge_(e_r1));
     mp3_sfb_long u_sfb2 (.rate, .idx(r12 > 6'd22 ? 5'd22 : r12[4:0]), .edge_(e_r2));
-    wire  [9:0] reg1 = ws ? 10'd36 : e_r1;
-    wire  [9:0] reg2 = ws ? 10'd576 : e_r2;
-    wire  [9:0] big  = (bv > 9'd288) ? 10'd576 : {bv, 1'b0};
+    // Registered in G_SEEK2, once per granule.
+    logic [9:0] reg1 = '0, reg2 = '0, big = '0;
 
     logic [2:0] slen1, slen2;
     mp3_slen u_slen (.sfc, .slen1, .slen2);
@@ -82,16 +83,15 @@ module mp3_granule (
     always_ff @(posedge clk) begin
         logic [15:0] b;
         logic [4:0]  c;
-        b = bbuf;
-        c = bcnt;
-        if (c != 0 && (drop != 0 || take)) begin
+        // Merge an arriving byte behind the bits held (position from the
+        // registered count), then take one bit if wanted: `take` only drives
+        // the last shift.
+        b = bbuf | (arrive ? ({res_rdata, 8'h00} >> bcnt) : 16'h0000);
+        c = bcnt + (arrive ? 5'd8 : 5'd0);
+        if (bcnt != 0 && (drop != 0 || take)) begin
             b = {b[14:0], 1'b0};
             c = c - 1'b1;
             if (drop != 0) drop <= drop - 1'b1;
-        end
-        if (arrive) begin
-            b = b | ({res_rdata, 8'h00} >> c);
-            c = c + 5'd8;
         end
         bbuf <= b;
         bcnt <= c;
@@ -117,7 +117,8 @@ module mp3_granule (
     logic [10:0] rom_addr, node = '0, root;
     logic [23:0] rom_data;
     logic        tbl_empty;
-    logic [5:0]  tbl;
+    // The table for value i, registered (G_PREP makes sure it is current).
+    logic [5:0]  tbl = '0;
     huff_rom  u_rom  (.clk, .addr(rom_addr), .data(rom_data));
     huff_root u_root (.table_no(tbl), .root, .empty(tbl_empty));
     logic [3:0] linbits;
@@ -125,25 +126,39 @@ module mp3_granule (
     wire [11:0] child = bit_now ? rom_data[11:0] : rom_data[23:12];
 
     // ------------------------------------------------------------ values RAM
-    logic [15:0] is_mem [0:575];
+    // 18 bits wide so a RAMB16 in its x18 mode has every data input used
+    // (bitgen rejects unconnected parity inputs); the top 2 bits are 0.
+    logic [17:0] is_mem [0:575];
     logic        is_we = 1'b0;
     logic [9:0]  is_waddr = '0, is_raddr = '0;
     logic [15:0] is_wdata = '0, is_rdata;
+    logic [17:0] is_rd18;
     always_ff @(posedge clk) begin
-        if (is_we) is_mem[is_waddr] <= is_wdata;
-        is_rdata <= is_mem[is_raddr];
+        if (is_we) is_mem[is_waddr] <= {2'b00, is_wdata};
+        is_rd18 <= is_mem[is_raddr];
     end
+    assign is_rdata = is_rd18[15:0];
 
     // ------------------------------------------------------------ control
     typedef enum logic [4:0] {
-        G_IDLE, G_SEEK, G_SF, G_PAIR, G_WAIT, G_WALK, G_LIN, G_SIGN, G_WPAIR,
-        G_C1, G_C1SIGN, G_WQUAD, G_ZERO, G_EMIT_SF, G_EMIT_IS, G_NEXT
+        G_IDLE, G_SEEK, G_SEEK2, G_SF, G_PREP, G_PAIR, G_WAIT, G_WALK, G_LIN, G_SIGN, G_WPAIR,
+        G_C1, G_C1SIGN, G_WQUAD, G_ZERO, G_EMIT_SF, G_EMIT_IS, G_SAVE, G_NEXT
     } gstate_t;
     gstate_t st = G_IDLE;
 
-    logic [3:0]  sfl [0:21];
-    logic [3:0]  sfs [0:38];
-    logic [3:0]  sav [0:1][0:20];        // granule 0's long scale factors (scfsi)
+    // Scale factors: LUT RAMs with one write port each.
+    logic [3:0]  sf_mem [0:63];          // 0..21 long, 22 + 3 * band + window short
+    logic [63:0] sf_set = '0;            // written in this granule (else 0)
+    logic [3:0]  sav_mem [0:63];         // granule 0's long factors, {channel, band}
+    logic        sf_we;
+    logic [5:0]  sf_widx;
+    logic [3:0]  sf_wval;
+    wire  [3:0]  sav_r = sav_mem[{ch, band}];
+    always_ff @(posedge clk) if (sf_we) sf_mem[sf_widx] <= sf_wval;
+    logic        sav_we = 1'b0;
+    logic [5:0]  sav_widx = '0;
+    logic [3:0]  sav_wval = '0;
+    always_ff @(posedge clk) if (sav_we) sav_mem[sav_widx] <= sav_wval;
     logic [14:0] gstart = '0;            // granule start, bit address in the ring
     logic [12:0] pos = '0;               // bits used in this granule
     logic [9:0]  i = '0;                 // value index
@@ -170,6 +185,7 @@ module mp3_granule (
 
     // Emit.
     logic [5:0]  ek = '0;
+    wire  [3:0]  sf_r = sf_set[ek] ? sf_mem[ek] : 4'd0;
     logic        hi = 1'b0;
     logic [31:0] crc_r = 32'hFFFFFFFF;
     assign crc = ~crc_r;
@@ -182,12 +198,17 @@ module mp3_granule (
 
     assign fd_ready = st == G_IDLE;
 
+    // Scale factor completion and its write.
+    wire sf_done = st == G_SF && (reuse || nb == 0 || k == nb);
+    assign sf_we = sf_done;
+    assign sf_widx = sf_short ? 6'd22 + 6'(3 * band) + 6'(win) : 6'(band);
+    assign sf_wval = reuse ? sav_r : (nb == 0 ? 4'd0 : sacc);
+
     always_comb begin
         take = 1'b0;
         seek = 1'b0;
         seek_bit = gstart;
         rom_addr = node;
-        tbl = quad ? 6'd32 + 6'(c1t) : (i < reg1 ? 6'(ts0) : i < reg2 ? 6'(ts1) : 6'(ts2));
         case (st)
             G_SEEK: seek = 1'b1;
             G_SF:   take = bit_ok && nb != 0 && !reuse && k < nb;
@@ -203,8 +224,12 @@ module mp3_granule (
         endcase
     end
 
+    always_ff @(posedge clk)
+        tbl <= quad ? 6'd32 + 6'(c1t) : (i < reg1 ? 6'(ts0) : i < reg2 ? 6'(ts1) : 6'(ts2));
+
     always_ff @(posedge clk) begin
         is_we <= 1'b0;
+        sav_we <= 1'b0;
         rec_valid <= 1'b0;
         if (take) pos <= pos + 1'b1;
         case (st)
@@ -218,11 +243,17 @@ module mp3_granule (
                     if (side[296]) st <= G_SEEK;
                 end
             G_SEEK: begin
+                ent <= fr[74 * {gr, ch} +: 74];
+                st <= G_SEEK2;
+            end
+            G_SEEK2: begin
+                reg1 <= ws ? 10'd36 : e_r1;
+                reg2 <= ws ? 10'd576 : e_r2;
+                big  <= (bv > 9'd288) ? 10'd576 : {bv, 1'b0};
                 pos <= '0;
                 i <= '0;
                 quad <= 1'b0;
-                for (int b = 0; b < 22; b++) sfl[b] <= '0;
-                for (int b = 0; b < 39; b++) sfs[b] <= '0;
+                sf_set <= '0;
                 sf_short <= short_blk && !mix;
                 band <= '0;
                 win <= '0;
@@ -237,13 +268,9 @@ module mp3_granule (
                     sacc <= {sacc[2:0], bit_now};
                     k <= k + 1'b1;
                 end
-                if (reuse || nb == 0 || (k == nb)) begin
-                    // This factor is complete: store it and move on.
-                    if (!sf_short) begin
-                        sfl[band] <= reuse ? sav[ch][band] : (nb == 0 ? 4'd0 : sacc);
-                    end else begin
-                        sfs[3 * band + win] <= nb == 0 ? 4'd0 : sacc;
-                    end
+                if (sf_done) begin
+                    // This factor is complete (stored through sf_we) : move on.
+                    sf_set[sf_widx] <= 1'b1;
                     k <= '0;
                     sacc <= '0;
                     if (!sf_short) begin
@@ -255,7 +282,7 @@ module mp3_granule (
                                 win <= '0;
                                 nb <= slen1;
                             end else begin
-                                st <= G_PAIR;
+                                st <= G_PREP;
                             end
                         end else begin
                             band <= band + 1'b1;
@@ -267,7 +294,7 @@ module mp3_granule (
                         end else begin
                             win <= '0;
                             if (band == 5'd11) begin
-                                st <= G_PAIR;
+                                st <= G_PREP;
                             end else begin
                                 band <= band + 1'b1;
                                 nb <= (band + 1'b1 < 6) ? slen1 : slen2;
@@ -277,10 +304,11 @@ module mp3_granule (
                 end
             end
             // ---- big values: pick the table and start the walk
+            G_PREP: if (quad) st <= G_C1; else st <= G_PAIR;   // `tbl` follows i and quad
             G_PAIR:
                 if (i >= big) begin
                     quad <= 1'b1;
-                    st <= G_C1;
+                    st <= G_PREP;
                 end else if (tbl_empty) begin
                     vx <= '0;
                     vy <= '0;
@@ -342,7 +370,7 @@ module mp3_granule (
                 wn <= wn + 1'b1;
                 if (wn == 3'd1) begin
                     i <= i + 10'd2;
-                    st <= G_PAIR;
+                    st <= G_PREP;
                 end
             end
             // ---- count1 quadruples until part2_3_length bits are used
@@ -395,8 +423,8 @@ module mp3_granule (
             // ---- record: scale factors, then the values (16-bit LE)
             G_EMIT_SF: begin
                 rec_valid <= 1'b1;
-                rec_data <= 8'(ek < 22 ? sfl[ek] : sfs[ek - 6'd22]);
-                crc_r <= crc_byte(crc_r, 8'(ek < 22 ? sfl[ek] : sfs[ek - 6'd22]));
+                rec_data <= 8'(sf_r);
+                crc_r <= crc_byte(crc_r, 8'(sf_r));
                 ek <= ek + 1'b1;
                 if (ek == 6'd60) begin
                     st <= G_EMIT_IS;
@@ -419,12 +447,22 @@ module mp3_granule (
                         i <= i + 1'b1;
                         is_raddr <= i + 1'b1;
                         wn <= '0;
-                        if (i == 10'd575) st <= G_NEXT;
+                        if (i == 10'd575) begin
+                            ek <= '0;
+                            if (!gr) st <= G_SAVE; else st <= G_NEXT;
+                        end
                     end
                 end
+            // Granule 0: keep its long factors for scfsi in granule 1.
+            G_SAVE: begin
+                sav_we <= 1'b1;
+                sav_widx <= {ch, ek[4:0]};
+                sav_wval <= sf_r;
+                ek <= ek + 1'b1;
+                if (ek == 6'd20) st <= G_NEXT;
+            end
             G_NEXT: begin
                 granules <= granules + 1'b1;
-                if (!gr) for (int b = 0; b < 21; b++) sav[ch][b] <= sfl[b];
                 gstart <= gstart + 15'(p23);
                 if (!mono && !ch) begin
                     ch <= 1'b1;

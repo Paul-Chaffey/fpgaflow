@@ -38,3 +38,24 @@ fpgaflow-celoxica mp3-check song.mp3        # frames, bytes and CRC vs the model
 
 The display shows the frame count (low byte, hex); LED 0 is lit when the
 stream is idle, LEDs 4-7 show the input buffer filling.
+
+## Milestone 2: scale factors and Huffman decoding
+
+`mp3_granule` takes each frame's side info from the front end (which stays
+at most one frame ahead, so the reservoir is never overwritten under it) and
+reads the reservoir bit by bit:
+
+- scale factors in all three layouts (long, short, mixed), with scfsi
+  reusing granule 0's, kept in small LUT RAMs;
+- the 576 Huffman values per granule: big-value pairs in three regions
+  (linbits, signs), then count1 quadruples up to part2_3_length (one that
+  runs past the end is dropped), the rest zero. The codes are walked one
+  node per cycle through binary trees in block RAM (`huff_rom.sv`, 1393
+  nodes, generated with `mp3model rtl-tables examples/rc10-mp3/rtl` from the
+  model's own tables, like `mp3_tables.sv`).
+
+Each granule gives a record (61 scale factors, 576 values) with a running
+CRC-32. The testbench compares every scale factor and value with the model;
+`mp3-check` compares granule counts and the CRC on the board. The project
+simulates in Verilator: the 18 vector streams (5160 frames, 17270 granules)
+take about 3 minutes there, about 35 in Icarus.
