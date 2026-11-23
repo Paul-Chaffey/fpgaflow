@@ -150,8 +150,10 @@ Measured with `examples/rc10-usb-probe` on 2026-11-23:
   FPGA registers on the second edge after it sees nCS low (counting from that
   edge as 0: bytes 0, 1, 2 … with no gaps); one burst per 512-byte packet.
   8 MB read at 22.2 MB/s.
-- Not yet measured: how many bytes still arrive after the FPGA raises FULL,
-  and how a burst ends when it raises EMPTY.
+- FULL: at most 3 bytes still arrive after the FPGA raises FULL (its
+  registered output), measured with examples/rc10-pcm-player streaming 8 s
+  of audio with the buffer held at 96% by FULL; nothing lost.
+- Not yet measured: how a read burst ends when the FPGA raises EMPTY.
 
 ## Embedded resources in RC.dll (`docs/celoxica/rcdll-resources/` after extraction)
 
