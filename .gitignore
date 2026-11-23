@@ -10,3 +10,4 @@
 # Flash images read from boards (may contain third-party bitstreams)
 /images/*
 !/images/README.md
+/build/

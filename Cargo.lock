@@ -1565,6 +1565,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "fpgaflow-mp3model"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+]
+
+[[package]]
 name = "fpgaflow-pnr"
 version = "0.1.0"
 dependencies = [
