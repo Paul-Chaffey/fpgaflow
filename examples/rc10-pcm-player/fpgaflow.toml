@@ -1,0 +1,26 @@
+[project]
+name = "rc10-pcm-player"
+top = "pcm_player"
+
+[sources]
+rtl = ["rtl/**/*.sv"]
+tb = ["tb/**/*.sv"]
+
+[sim]
+tool = "icarus"
+tb_top = "tb_pcm_player"
+wave = "fst"
+
+# Celoxica RC10 (XC3S1500-4FG320): plays music streamed over USB with
+# `fpgaflow-celoxica play FILE`. See README.md.
+[target]
+board = "rc10"
+family = "spartan3"
+device = "xc3s1500"
+package = "fg320"
+speed = "4"
+backend = "ise"
+constraints = ["constraints/rc10-pcm-player.ucf"]
+
+[program]
+mode = "sram"

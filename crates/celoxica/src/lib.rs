@@ -110,6 +110,8 @@ pub enum Error {
     Usb(#[from] rusb::Error),
     #[error("{0}: {1}")]
     File(String, std::io::Error),
+    #[error("{0}")]
+    Other(String),
     #[error("flash file {index} is {found} bytes after writing, expected {expected}")]
     FlashLength {
         index: u8,
@@ -195,6 +197,10 @@ pub struct Board {
     pub part: &'static str,
     pub bus: u8,
     pub address: u8,
+    /// The alternate setting last selected. Every SET_INTERFACE makes the
+    /// firmware reset its FIFOs (losing data in flight), so it is only sent
+    /// when the setting changes.
+    alt: std::cell::Cell<Option<u8>>,
 }
 
 impl Board {
@@ -223,6 +229,7 @@ impl Board {
                 part,
                 bus: dev.bus_number(),
                 address: dev.address(),
+                alt: std::cell::Cell::new(None),
             });
         }
         Err(Error::NotFound)
@@ -248,7 +255,7 @@ impl Board {
         mut progress: impl FnMut(usize, usize),
     ) -> Result<(), Error> {
         check_bitstream(data, self.name, self.part)?;
-        self.handle.set_alternate_setting(0, 0)?;
+        self.set_alt(0)?;
         self.handle
             .write_control(0x40, REQ_NPROG, 0, 0, &[], CTRL_TIMEOUT)?;
         let mut sent = 0;
@@ -275,6 +282,15 @@ impl Board {
 }
 
 impl Board {
+    fn set_alt(&self, alt: u8) -> Result<(), Error> {
+        if self.alt.get() != Some(alt) {
+            self.alt.set(None);
+            self.handle.set_alternate_setting(0, alt)?;
+            self.alt.set(Some(alt));
+        }
+        Ok(())
+    }
+
     fn command(&self, packet: [u8; 10]) -> Result<(), Error> {
         self.handle
             .write_control(0x40, REQ_COMMAND, 0, 0, &packet, FLASH_TIMEOUT)?;
@@ -308,7 +324,7 @@ impl Board {
             }
             out.extend_from_slice(&buf[..got.min(n - out.len())]);
         }
-        if n % 512 == 0 {
+        if n.is_multiple_of(512) {
             match self
                 .handle
                 .read_bulk(EP_IN, &mut buf[..512], Duration::from_millis(200))
@@ -322,13 +338,13 @@ impl Board {
     }
 
     fn flash_mode(&self) -> Result<(), Error> {
-        self.handle.set_alternate_setting(0, ALT_FLASH)?;
+        self.set_alt(ALT_FLASH)?;
         Ok(())
     }
 
     /// Back to the configuration interface (alternate setting 0).
     pub fn normal_mode(&self) -> Result<(), Error> {
-        self.handle.set_alternate_setting(0, 0)?;
+        self.set_alt(0)?;
         Ok(())
     }
 
@@ -410,7 +426,7 @@ impl Board {
 
 impl Board {
     fn data_mode(&self) -> Result<(), Error> {
-        self.handle.set_alternate_setting(0, ALT_DATA)?;
+        self.set_alt(ALT_DATA)?;
         Ok(())
     }
 
@@ -431,6 +447,21 @@ impl Board {
             }
         }
         Ok(off)
+    }
+
+    /// Send `data` to the running FPGA design, waiting as long as the design
+    /// holds FX2_FULL (no timeout: a timed-out transfer can't say how much
+    /// of it went, and a stream must not lose its place).
+    pub fn usb_send(&self, data: &[u8]) -> Result<(), Error> {
+        self.data_mode()?;
+        let mut off = 0;
+        while off < data.len() {
+            let end = (off + CHUNK).min(data.len());
+            off += self
+                .handle
+                .write_bulk(EP_BITSTREAM, &data[off..end], Duration::ZERO)?;
+        }
+        Ok(())
     }
 
     /// Read `n` bytes from the running FPGA design. Times out if the design

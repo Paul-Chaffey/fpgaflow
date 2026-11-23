@@ -10,11 +10,11 @@
 //! `method = "celoxica"`.
 
 use std::process::ExitCode;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use fpgaflow_celoxica::{check_bitstream, Board, Error};
 
-const USAGE: &str = "usage: fpgaflow-celoxica status | load FILE.bit | flash-list | flash-read OUT.tar | flash-write FILE.bit [INDEX] | usb-write FILE | usb-read N [OUT] | --version";
+const USAGE: &str = "usage: fpgaflow-celoxica status | load FILE.bit | flash-list | flash-read OUT.tar | flash-write FILE.bit [INDEX] | usb-write FILE | usb-read N [OUT] | play AUDIOFILE | --version";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -27,6 +27,7 @@ fn main() -> ExitCode {
         ["load", file] => load(file),
         ["flash-list"] => flash_list(),
         ["usb-write", file] => usb_write(file),
+        ["play", file] => play(file),
         ["usb-read", n] | ["usb-read", n, _] => match n.parse() {
             Ok(n) => usb_read(n, args.get(2).map(String::as_str)),
             Err(_) => {
@@ -139,6 +140,155 @@ fn usb_read(n: usize, out: Option<&str>) -> Result<(), Error> {
         }
     }
     Ok(())
+}
+
+/// Status block of examples/rc10-pcm-player (see its pcm_player.sv).
+struct PlayerStatus {
+    bytes: u32,
+    underruns: u16,
+    missed: u16,
+    dropped: u16,
+    late_max: u16,
+    fill: u8,
+    idle: bool,
+    paused: bool,
+    empty: bool,
+    volume: u8,
+}
+
+fn player_status(b: &fpgaflow_celoxica::Board) -> Result<PlayerStatus, Error> {
+    let s = b.usb_read(16, Duration::from_secs(2))?;
+    if &s[0..2] != b"P1" {
+        return Err(Error::Other(
+            "the RC10 isn't running the PCM player: load \
+             examples/rc10-pcm-player/build/impl/pcm_player.bit first"
+                .into(),
+        ));
+    }
+    let u16_at = |i: usize| u16::from_le_bytes([s[i], s[i + 1]]);
+    Ok(PlayerStatus {
+        bytes: u32::from_le_bytes([s[2], s[3], s[4], s[5]]),
+        underruns: u16_at(6),
+        missed: u16_at(8),
+        dropped: u16_at(10),
+        late_max: u16_at(12),
+        fill: s[14],
+        idle: s[15] & 0x80 != 0,
+        paused: s[15] & 0x40 != 0,
+        empty: s[15] & 0x20 != 0,
+        volume: s[15] & 0x0f,
+    })
+}
+
+/// Poll the player's status until `done` (or give up after `limit`).
+fn wait_player(
+    b: &fpgaflow_celoxica::Board,
+    limit: Duration,
+    done: impl Fn(&PlayerStatus) -> bool,
+) -> Result<PlayerStatus, Error> {
+    let start = Instant::now();
+    loop {
+        let s = player_status(b)?;
+        if done(&s) || start.elapsed() > limit {
+            return Ok(s);
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Decode an audio file with ffmpeg to 48 kHz 16-bit stereo and stream it to
+/// examples/rc10-pcm-player. The player paces the stream with FULL.
+fn play(file: &str) -> Result<(), Error> {
+    use std::io::Read;
+    const RATE: u64 = 48_000 * 4; // bytes per second
+    let b = open()?;
+    // Wait for any earlier stream to finish playing and end, so this one
+    // starts on a sample boundary with fresh counts.
+    let s = wait_player(&b, Duration::from_secs(3), |s| s.empty && s.idle)?;
+    if !(s.empty && s.idle) {
+        return Err(Error::Other(
+            "the player is still busy with another stream".into(),
+        ));
+    }
+    let mut ff = std::process::Command::new("ffmpeg")
+        .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-i", file])
+        .args([
+            "-vn",
+            "-f",
+            "s16le",
+            "-acodec",
+            "pcm_s16le",
+            "-ac",
+            "2",
+            "-ar",
+            "48000",
+            "pipe:1",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| Error::Other(format!("can't run ffmpeg: {e}")))?;
+    let mut out = ff.stdout.take().expect("piped");
+    println!("playing {file} (48 kHz stereo); volume and pause on the joystick");
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut sent: u64 = 0;
+    let mut shown = Instant::now();
+    loop {
+        // Fill the buffer (ffmpeg's pipe delivers in pieces); send whole samples.
+        let mut n = 0;
+        while n < buf.len() {
+            match out.read(&mut buf[n..]) {
+                Ok(0) => break,
+                Ok(k) => n += k,
+                Err(e) => return Err(Error::Other(format!("reading ffmpeg's output: {e}"))),
+            }
+        }
+        let whole = n - n % 4;
+        if whole == 0 {
+            break;
+        }
+        b.usb_send(&buf[..whole])?;
+        sent += whole as u64;
+        if shown.elapsed() >= Duration::from_secs(1) {
+            shown = Instant::now();
+            let s = player_status(&b)?;
+            let t = sent / RATE;
+            print!(
+                "\r  {:>2}:{:02}  buffer {:>3}%  volume {:>2}{}  underruns {}   ",
+                t / 60,
+                t % 60,
+                s.fill as u32 * 100 / 255,
+                s.volume,
+                if s.paused { " (paused)" } else { "" },
+                s.underruns
+            );
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+        }
+        if n < buf.len() {
+            break;
+        }
+    }
+    let status = ff
+        .wait()
+        .map_err(|e| Error::Other(format!("ffmpeg: {e}")))?;
+    // Let the buffer play out (85 ms when full), then report.
+    let s = wait_player(&b, Duration::from_secs(2), |s| s.empty)?;
+    let t = sent / RATE;
+    println!(
+        "\r  {}:{:02} played, {} bytes; FPGA received {} bytes, {} underrun(s) ({} samples), \
+         {} dropped, at most {} bytes after FULL",
+        t / 60,
+        t % 60,
+        sent,
+        s.bytes,
+        s.underruns,
+        s.missed,
+        s.dropped,
+        s.late_max
+    );
+    if !status.success() {
+        return Err(Error::Other(format!("ffmpeg failed ({status})")));
+    }
+    b.normal_mode()
 }
 
 fn flash_list() -> Result<(), Error> {
