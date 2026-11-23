@@ -5,7 +5,9 @@
 //!   mp3model compare-pcm IN REF.pcm  against a 16-bit reference output (ISO conformance)
 //!   mp3model info IN.mp3             which coding features the stream uses
 //!   mp3model stats FILES             peak value after each stage
-//!   mp3model frontend IN OUT         front-end vectors: OUT.mp3 (as sent) and OUT.model.txt
+//!   mp3model frontend IN OUT         decoder vectors: OUT.mp3 (as sent), OUT.model.txt
+//!                                    (frame records), OUT.gran.txt (granule records)
+//!   mp3model rtl-tables DIR          generated RTL tables (DIR/huff_rom.sv)
 //!   mp3model fixed W I C M FILES     fixed-point back end vs the float model
 
 use std::process::{Command, ExitCode};
@@ -27,6 +29,7 @@ fn main() -> ExitCode {
         ["compare-pcm", input, reference] => compare_pcm(input, reference),
         ["stats", ref inputs @ ..] if !inputs.is_empty() => stats(inputs),
         ["frontend", input, out] => frontend(input, out),
+        ["rtl-tables", dir] => rtl_tables(dir),
         ["fixed", w, i, c, m, ref inputs @ ..] if !inputs.is_empty() => {
             match (w.parse(), i.parse(), c.parse(), m.parse()) {
                 (Ok(w), Ok(i), Ok(c), Ok(m)) => {
@@ -316,10 +319,40 @@ fn frontend(input: &str, out: &str) -> Result<()> {
         text.push('\n');
     }
     std::fs::write(format!("{out}.model.txt"), text)?;
+    // Granule records: 61 scale factors and 576 values, decimal, one line each.
+    let (grans, gcrc) = fpgaflow_mp3model::frontend::granules(sent);
+    let mut text = String::new();
+    for g in &grans {
+        let vals: Vec<String> =
+            g.sf.iter()
+                .map(|v| v.to_string())
+                .chain(g.is.iter().map(|v| v.to_string()))
+                .collect();
+        text.push_str(&vals.join(" "));
+        text.push('\n');
+    }
+    std::fs::write(format!("{out}.gran.txt"), text)?;
     println!(
-        "{input}: {} frames, CRC {:08x}, {} bytes skipped, {} undecodable",
-        s.frames, s.crc, s.skipped, s.undecodable
+        "{input}: {} frames, CRC {:08x}, {} bytes skipped, {} undecodable; {} granules, CRC {:08x}",
+        s.frames,
+        s.crc,
+        s.skipped,
+        s.undecodable,
+        grans.len(),
+        gcrc
     );
+    Ok(())
+}
+
+fn rtl_tables(dir: &str) -> Result<()> {
+    let p = format!("{dir}/huff_rom.sv");
+    std::fs::write(&p, fpgaflow_mp3model::rtl::huffman_sv())?;
+    std::fs::write(
+        format!("{dir}/mp3_tables.sv"),
+        fpgaflow_mp3model::rtl::tables_sv(),
+    )?;
+    let (nodes, _) = fpgaflow_mp3model::rtl::huffman_nodes();
+    println!("wrote {p} ({} tree nodes)", nodes.len());
     Ok(())
 }
 

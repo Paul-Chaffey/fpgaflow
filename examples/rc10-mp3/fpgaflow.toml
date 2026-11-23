@@ -7,8 +7,8 @@ rtl = ["rtl/**/*.sv"]
 tb = ["tb/**/*.sv"]
 
 [sim]
-tool = "icarus"
-tb_top = "tb_frontend"
+tool = "verilator"   # ~35 min in Icarus for the full vector set
+tb_top = "tb_decoder"
 wave = "fst"
 
 # Celoxica RC10 (XC3S1500-4FG320): MP3 decoder in the FPGA

@@ -157,3 +157,59 @@ mod tests {
         assert_eq!(strip_id3(&[1, 2, 3]), &[1, 2, 3]);
     }
 }
+
+/// One granule of one channel as the hardware's granule decoder (milestone 2)
+/// produces it: 22 long and 13 x 3 short scale factors, then the 576
+/// Huffman-decoded values.
+#[derive(Debug, Clone)]
+pub struct GranuleRecord {
+    pub frame: usize,
+    pub gr: usize,
+    pub ch: usize,
+    pub sf: [u8; 61],
+    pub is: [i32; 576],
+}
+
+impl GranuleRecord {
+    /// The bytes the CRC covers: the 61 scale factors, then each value as a
+    /// 16-bit little-endian integer.
+    pub fn bytes(&self) -> Vec<u8> {
+        let mut b = self.sf.to_vec();
+        for v in self.is {
+            b.extend_from_slice(&(v as i16).to_le_bytes());
+        }
+        b
+    }
+}
+
+/// Granule records for every decodable frame of a stream (as sent), with
+/// their count and CRC-32 over [`GranuleRecord::bytes`].
+pub fn granules(data: &[u8]) -> (Vec<GranuleRecord>, u32) {
+    let mut out = Vec::new();
+    let mut crc = Crc32::default();
+    let mut d = crate::Decoder::default();
+    for (i, (pos, h)) in find_frames(data).into_iter().enumerate() {
+        let Some(f) = d.decode_frame(&data[pos..pos + h.frame_len()]) else {
+            continue;
+        };
+        for (gr, chans) in f.granules.iter().enumerate() {
+            for (ch, t) in chans.iter().enumerate() {
+                let mut sf = [0u8; 61];
+                sf[..22].copy_from_slice(&t.sf.long);
+                for band in 0..13 {
+                    sf[22 + 3 * band..25 + 3 * band].copy_from_slice(&t.sf.short[band]);
+                }
+                let r = GranuleRecord {
+                    frame: i,
+                    gr,
+                    ch,
+                    sf,
+                    is: t.is,
+                };
+                crc.update(&r.bytes());
+                out.push(r);
+            }
+        }
+    }
+    (out, crc.value())
+}

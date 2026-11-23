@@ -37,7 +37,19 @@ module mp3_frontend #(
     output logic [AW:0] fill,
     // Reservoir read port (for the granule decoder)
     input  logic [11:0] res_raddr,
-    output logic [7:0]  res_rdata
+    output logic [7:0]  res_rdata,
+    // Frame hand-off to the granule decoder: `side` is valid while
+    // `fd_valid`; the front end waits for `fd_ready`, so it is never more
+    // than one frame ahead (the reservoir isn't overwritten under the
+    // decoder). Layout (MSB first): header 32, main_data_begin 9, scfsi 8,
+    // main-data start 12, decodable 1, then entries 3..0 (2 * granule +
+    // channel), 74 bits each: part2_3 12, big_values 9, global_gain 8,
+    // scalefac_compress 4, window_switching, mixed, block_type 2,
+    // table_select 0..2 (5 each), subblock_gain 0..2 (3 each), region0 4,
+    // region1 6, preflag, scalefac_scale, count1table.
+    output logic [357:0] side,
+    output logic        fd_valid,
+    input  logic        fd_ready
 );
     // ------------------------------------------------------------ helpers
     function automatic logic hdr_ok(input logic [31:0] h);
@@ -394,7 +406,7 @@ module mp3_frontend #(
                     res_wp <= res_wp + 1'b1;
                     if (got_last_d) st <= S_REC;
                 end
-            S_REC: begin
+            S_REC: if (fd_ready) begin
                 rec <= record();
                 rec_left <= 7'd70;
                 frames <= frames + 1'b1;
@@ -419,6 +431,17 @@ module mp3_frontend #(
             rec_left <= '0;
         end
     end
+
+    // ------------------------------------------------------------ hand-off
+    // Written out (not a function of the arrays): a simulator need not
+    // re-evaluate a continuous assignment when a function's module-level
+    // reads change.
+`define FE_ENTRY(i) p23[i], bv[i], gg[i], sfc[i], ws[i], mix[i], bt[i], ts0[i], ts1[i], ts2[i], \
+                    sbg0[i], sbg1[i], sbg2[i], r0[i], r1[i], pre[i], scs[i], c1[i]
+    assign side = {hdr, mdb, scfsi, md_start, decodable,
+                   `FE_ENTRY(3), `FE_ENTRY(2), `FE_ENTRY(1), `FE_ENTRY(0)};
+`undef FE_ENTRY
+    assign fd_valid = st == S_REC && fd_ready;
 
     // ------------------------------------------------------------ record
     function automatic logic [559:0] record();

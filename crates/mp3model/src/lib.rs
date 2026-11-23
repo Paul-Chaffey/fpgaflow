@@ -14,6 +14,7 @@ pub mod fixed;
 pub mod frame;
 pub mod frontend;
 pub mod layer3;
+pub mod rtl;
 pub mod tables;
 
 use bits::Bits;

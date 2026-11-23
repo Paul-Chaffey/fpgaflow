@@ -1,11 +1,12 @@
 `timescale 1ns/1ps
 
-// RC10 MP3 decoder, milestone 1: the front end on the board.
+// RC10 MP3 decoder on the board, so far: the front end (milestone 1) and
+// scale factors + Huffman decoding (milestone 2).
 // `fpgaflow-celoxica mp3-check FILE` streams an MP3 over USB and compares
-// what the front end found with crates/mp3model.
+// what the decoder found with crates/mp3model.
 //
-// Status (USB read, 32 bytes):
-//   0-1   "M1"
+// Status (USB read, 64 bytes):
+//   0-1   "M2"
 //   2-5   bytes received in this stream
 //   6-9   frames found
 //   10-13 bytes inside those frames
@@ -14,7 +15,9 @@
 //   22-23 frames whose main data begins before the stream
 //   24    input buffer fill, 0-255
 //   25    {idle, full, 6'b0}
-//   31    C3
+//   26-29 granules decoded (Huffman)
+//   30-33 CRC-32 of the granule records (scale factors + 576 values)
+//   63    C3
 // Display: frames found (low byte, hex). LEDs 4-7: buffer fill; LED 0: idle.
 module mp3_top #(
     parameter int IDLE_BITS = 20
@@ -32,8 +35,8 @@ module mp3_top #(
 );
     logic         rx_valid, idle;
     logic [7:0]   rx_data;
-    logic [255:0] status;
-    fx2_bus #(.IDLE_BITS(IDLE_BITS), .SB(5)) u_bus (
+    logic [511:0] status;
+    fx2_bus #(.IDLE_BITS(IDLE_BITS), .SB(6)) u_bus (
         .clk, .fx2_ncs, .fx2_nwr, .fx2_seln, .fx2_d,
         .rx_valid, .rx_data, .idle, .status
     );
@@ -48,7 +51,17 @@ module mp3_top #(
     mp3_frontend u_fe (
         .clk, .in_valid(rx_valid), .in_data(rx_data), .new_stream, .idle, .full,
         .rec_valid, .rec_data, .frames, .frame_bytes, .undecodable, .crc,
-        .last_header, .fill, .res_raddr(12'd0), .res_rdata
+        .last_header, .fill, .res_raddr, .res_rdata,
+        .side, .fd_valid, .fd_ready
+    );
+    logic [11:0]  res_raddr;
+    logic [357:0] side;
+    logic         fd_valid, fd_ready, g_valid;
+    logic [7:0]   g_data;
+    logic [31:0]  granules, gcrc;
+    mp3_granule u_gr (
+        .clk, .new_stream, .side, .fd_valid, .fd_ready, .res_raddr, .res_rdata,
+        .rec_valid(g_valid), .rec_data(g_data), .granules, .crc(gcrc)
     );
     assign fx2_full = full;
 
@@ -62,9 +75,9 @@ module mp3_top #(
     // 32-bit value placed as it is comes out little-endian; the header is
     // reversed so its bytes come out in stream order.
     assign status = {
-        8'hC3, 40'd0, {idle, full, 6'd0}, fill8, undecodable,
+        8'hC3, 232'd0, gcrc, granules, {idle, full, 6'd0}, fill8, undecodable,
         last_header[7:0], last_header[15:8], last_header[23:16], last_header[31:24],
-        crc, frame_bytes, frames, rx_bytes, 8'h31, 8'h4D
+        crc, frame_bytes, frames, rx_bytes, 8'h32, 8'h4D
     };
 
     function automatic logic [7:0] hex7(input logic [3:0] v);

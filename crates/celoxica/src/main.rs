@@ -315,11 +315,13 @@ struct FrontEndStatus {
     last_header: [u8; 4],
     undecodable: u16,
     idle: bool,
+    granules: u32,
+    granule_crc: u32,
 }
 
 fn front_end_status(b: &Board) -> Result<FrontEndStatus, Error> {
-    let s = b.usb_read(32, Duration::from_secs(2))?;
-    if &s[0..2] != b"M1" {
+    let s = b.usb_read(64, Duration::from_secs(2))?;
+    if &s[0..2] != b"M2" {
         return Err(Error::Other(
             "the RC10 isn't running the MP3 front end: load \
              examples/rc10-mp3/build/impl/mp3_top.bit first"
@@ -335,17 +337,21 @@ fn front_end_status(b: &Board) -> Result<FrontEndStatus, Error> {
         last_header: [s[18], s[19], s[20], s[21]],
         undecodable: u16::from_le_bytes([s[22], s[23]]),
         idle: s[25] & 0x80 != 0,
+        granules: u32_at(26),
+        granule_crc: u32_at(30),
     })
 }
 
-/// Stream an MP3 to the front end (milestone 1) and compare what it found
-/// with the model: frame count, bytes in frames, the CRC over every frame's
-/// header and side info, undecodable frames.
+/// Stream an MP3 to the decoder and compare what it found with the model:
+/// frame count, bytes in frames, the CRC over every frame's header and side
+/// info, undecodable frames (milestone 1); granules and the CRC over their
+/// scale factors and Huffman values (milestone 2).
 fn mp3_check(file: &str) -> Result<(), Error> {
-    use fpgaflow_mp3model::frontend::{records, strip_id3};
+    use fpgaflow_mp3model::frontend::{granules, records, strip_id3};
     let data = std::fs::read(file).map_err(|e| Error::File(file.to_string(), e))?;
     let sent = strip_id3(&data);
     let (_, want) = records(sent);
+    let (grans, gcrc) = granules(sent);
     let b = open()?;
     // A new stream needs the front end idle (22 ms without bytes).
     let start = Instant::now();
@@ -364,7 +370,9 @@ fn mp3_check(file: &str) -> Result<(), Error> {
     let start = Instant::now();
     let got = loop {
         let s = front_end_status(&b)?;
-        if (s.idle && s.frames == want.frames) || start.elapsed() > Duration::from_secs(3) {
+        if (s.idle && s.frames == want.frames && s.granules == grans.len() as u32)
+            || start.elapsed() > Duration::from_secs(5)
+        {
             break s;
         }
         std::thread::sleep(Duration::from_millis(10));
@@ -378,21 +386,22 @@ fn mp3_check(file: &str) -> Result<(), Error> {
         last_header: want.last_header,
         undecodable: want.undecodable,
         idle: true,
+        granules: grans.len() as u32,
+        granule_crc: gcrc,
+    };
+    let show = |s: &FrontEndStatus| {
+        format!(
+            "{} frames, {} bytes in frames, CRC {:08x}, {} undecodable, last header {:02x?}; \
+             {} granules, CRC {:08x}",
+            s.frames, s.frame_bytes, s.crc, s.undecodable, s.last_header, s.granules, s.granule_crc
+        )
     };
     println!(
-        "sent {} bytes in {secs:.2} s ({:.1} MB/s)\n  FPGA:  {} frames, {} bytes in frames, CRC {:08x}, {} undecodable, last header {:02x?}\n  model: {} frames, {} bytes in frames, CRC {:08x}, {} undecodable, last header {:02x?}",
+        "sent {} bytes in {secs:.2} s ({:.1} MB/s)\n  FPGA:  {}\n  model: {}",
         sent.len(),
         sent.len() as f64 / secs / 1e6,
-        got.frames,
-        got.frame_bytes,
-        got.crc,
-        got.undecodable,
-        got.last_header,
-        expect.frames,
-        expect.frame_bytes,
-        expect.crc,
-        expect.undecodable,
-        expect.last_header
+        show(&got),
+        show(&expect)
     );
     if got != expect {
         return Err(Error::Other(
