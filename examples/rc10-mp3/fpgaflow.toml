@@ -1,0 +1,26 @@
+[project]
+name = "rc10-mp3"
+top = "mp3_top"
+
+[sources]
+rtl = ["rtl/**/*.sv"]
+tb = ["tb/**/*.sv"]
+
+[sim]
+tool = "icarus"
+tb_top = "tb_frontend"
+wave = "fst"
+
+# Celoxica RC10 (XC3S1500-4FG320): MP3 decoder in the FPGA
+# (docs/mp3-decoder-plan.md). Milestone 1: the front end.
+[target]
+board = "rc10"
+family = "spartan3"
+device = "xc3s1500"
+package = "fg320"
+speed = "4"
+backend = "ise"
+constraints = ["constraints/rc10-mp3.ucf"]
+
+[program]
+mode = "sram"

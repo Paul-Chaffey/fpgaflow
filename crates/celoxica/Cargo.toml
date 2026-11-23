@@ -16,3 +16,4 @@ path = "src/main.rs"
 rusb = "0.9"
 tar = "0.4"
 thiserror.workspace = true
+fpgaflow-mp3model = { path = "../mp3model" }

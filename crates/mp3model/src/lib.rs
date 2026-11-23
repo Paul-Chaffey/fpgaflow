@@ -12,6 +12,7 @@
 pub mod bits;
 pub mod fixed;
 pub mod frame;
+pub mod frontend;
 pub mod layer3;
 pub mod tables;
 

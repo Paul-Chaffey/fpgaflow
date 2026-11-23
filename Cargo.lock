@@ -1450,6 +1450,7 @@ dependencies = [
 name = "fpgaflow-celoxica"
 version = "0.1.0"
 dependencies = [
+ "fpgaflow-mp3model",
  "rusb",
  "tar",
  "thiserror 2.0.21",

@@ -5,6 +5,7 @@
 //!   mp3model compare-pcm IN REF.pcm  against a 16-bit reference output (ISO conformance)
 //!   mp3model info IN.mp3             which coding features the stream uses
 //!   mp3model stats FILES             peak value after each stage
+//!   mp3model frontend IN OUT         front-end vectors: OUT.mp3 (as sent) and OUT.model.txt
 //!   mp3model fixed W I C M FILES     fixed-point back end vs the float model
 
 use std::process::{Command, ExitCode};
@@ -25,6 +26,7 @@ fn main() -> ExitCode {
         ["info", input] => info(input),
         ["compare-pcm", input, reference] => compare_pcm(input, reference),
         ["stats", ref inputs @ ..] if !inputs.is_empty() => stats(inputs),
+        ["frontend", input, out] => frontend(input, out),
         ["fixed", w, i, c, m, ref inputs @ ..] if !inputs.is_empty() => {
             match (w.parse(), i.parse(), c.parse(), m.parse()) {
                 (Ok(w), Ok(i), Ok(c), Ok(m)) => {
@@ -295,6 +297,29 @@ fn compare_pcm(input: &str, reference: &str) -> Result<()> {
     if hist[2] > 0 || ours.len() < refs.len() || ours.len() > refs.len() + 1152 * nch {
         bail!("differs from the reference");
     }
+    Ok(())
+}
+
+/// Front-end test vectors: the stream as the PC sends it and the records the
+/// hardware must produce (one hex line each, then a summary line).
+fn frontend(input: &str, out: &str) -> Result<()> {
+    use fpgaflow_mp3model::frontend::{records, strip_id3};
+    let data = read(input)?;
+    let sent = strip_id3(&data);
+    let (recs, s) = records(sent);
+    std::fs::write(format!("{out}.mp3"), sent)?;
+    let mut text = String::new();
+    for r in &recs {
+        for b in r {
+            text.push_str(&format!("{b:02x}"));
+        }
+        text.push('\n');
+    }
+    std::fs::write(format!("{out}.model.txt"), text)?;
+    println!(
+        "{input}: {} frames, CRC {:08x}, {} bytes skipped, {} undecodable",
+        s.frames, s.crc, s.skipped, s.undecodable
+    );
     Ok(())
 }
 

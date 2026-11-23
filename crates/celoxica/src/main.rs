@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use fpgaflow_celoxica::{check_bitstream, Board, Error};
 
-const USAGE: &str = "usage: fpgaflow-celoxica status | load FILE.bit | flash-list | flash-read OUT.tar | flash-write FILE.bit [INDEX] | usb-write FILE | usb-read N [OUT] | play AUDIOFILE | --version";
+const USAGE: &str = "usage: fpgaflow-celoxica status | load FILE.bit | flash-list | flash-read OUT.tar | flash-write FILE.bit [INDEX] | usb-write FILE | usb-read N [OUT] | play AUDIOFILE | mp3-check FILE.mp3 | --version";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -28,6 +28,7 @@ fn main() -> ExitCode {
         ["flash-list"] => flash_list(),
         ["usb-write", file] => usb_write(file),
         ["play", file] => play(file),
+        ["mp3-check", file] => mp3_check(file),
         ["usb-read", n] | ["usb-read", n, _] => match n.parse() {
             Ok(n) => usb_read(n, args.get(2).map(String::as_str)),
             Err(_) => {
@@ -302,6 +303,104 @@ fn play(file: &str) -> Result<(), Error> {
         return Err(Error::Other(format!("ffmpeg failed ({status})")));
     }
     b.normal_mode()
+}
+
+/// Status block of examples/rc10-mp3 (milestone 1, mp3_top.sv).
+#[derive(Debug, PartialEq, Eq)]
+struct FrontEndStatus {
+    rx_bytes: u32,
+    frames: u32,
+    frame_bytes: u32,
+    crc: u32,
+    last_header: [u8; 4],
+    undecodable: u16,
+    idle: bool,
+}
+
+fn front_end_status(b: &Board) -> Result<FrontEndStatus, Error> {
+    let s = b.usb_read(32, Duration::from_secs(2))?;
+    if &s[0..2] != b"M1" {
+        return Err(Error::Other(
+            "the RC10 isn't running the MP3 front end: load \
+             examples/rc10-mp3/build/impl/mp3_top.bit first"
+                .into(),
+        ));
+    }
+    let u32_at = |i: usize| u32::from_le_bytes([s[i], s[i + 1], s[i + 2], s[i + 3]]);
+    Ok(FrontEndStatus {
+        rx_bytes: u32_at(2),
+        frames: u32_at(6),
+        frame_bytes: u32_at(10),
+        crc: u32_at(14),
+        last_header: [s[18], s[19], s[20], s[21]],
+        undecodable: u16::from_le_bytes([s[22], s[23]]),
+        idle: s[25] & 0x80 != 0,
+    })
+}
+
+/// Stream an MP3 to the front end (milestone 1) and compare what it found
+/// with the model: frame count, bytes in frames, the CRC over every frame's
+/// header and side info, undecodable frames.
+fn mp3_check(file: &str) -> Result<(), Error> {
+    use fpgaflow_mp3model::frontend::{records, strip_id3};
+    let data = std::fs::read(file).map_err(|e| Error::File(file.to_string(), e))?;
+    let sent = strip_id3(&data);
+    let (_, want) = records(sent);
+    let b = open()?;
+    // A new stream needs the front end idle (22 ms without bytes).
+    let start = Instant::now();
+    while !front_end_status(&b)?.idle {
+        if start.elapsed() > Duration::from_secs(3) {
+            return Err(Error::Other(
+                "the front end is still busy with another stream".into(),
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let t = Instant::now();
+    b.usb_send(sent)?;
+    let secs = t.elapsed().as_secs_f64();
+    // The last frame is accepted when the stream goes idle.
+    let start = Instant::now();
+    let got = loop {
+        let s = front_end_status(&b)?;
+        if (s.idle && s.frames == want.frames) || start.elapsed() > Duration::from_secs(3) {
+            break s;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    b.normal_mode()?;
+    let expect = FrontEndStatus {
+        rx_bytes: sent.len() as u32,
+        frames: want.frames,
+        frame_bytes: sent.len() as u32 - want.skipped,
+        crc: want.crc,
+        last_header: want.last_header,
+        undecodable: want.undecodable,
+        idle: true,
+    };
+    println!(
+        "sent {} bytes in {secs:.2} s ({:.1} MB/s)\n  FPGA:  {} frames, {} bytes in frames, CRC {:08x}, {} undecodable, last header {:02x?}\n  model: {} frames, {} bytes in frames, CRC {:08x}, {} undecodable, last header {:02x?}",
+        sent.len(),
+        sent.len() as f64 / secs / 1e6,
+        got.frames,
+        got.frame_bytes,
+        got.crc,
+        got.undecodable,
+        got.last_header,
+        expect.frames,
+        expect.frame_bytes,
+        expect.crc,
+        expect.undecodable,
+        expect.last_header
+    );
+    if got != expect {
+        return Err(Error::Other(
+            "the FPGA's front end and the model disagree".into(),
+        ));
+    }
+    println!("  match");
+    Ok(())
 }
 
 fn flash_list() -> Result<(), Error> {
