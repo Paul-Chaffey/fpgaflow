@@ -16,10 +16,12 @@
 //   10-11 bytes dropped because the buffer was full
 //   12-13 most bytes accepted in one go after FULL went high (the FX2's latency)
 //   14    buffer fill, 0-255
-//   15    {idle, paused, empty, 0, volume[3:0]}
+//   15    {idle, paused, empty, rz, volume[3:0]}
 //
-// Joystick: up/right = louder, down/left = quieter (16 steps of 3 dB, 0 =
-// mute), centre = pause. Display: volume; dot = paused. LEDs: buffer fill.
+// Joystick: up = louder, down = quieter (16 steps of 3 dB, 0 = mute),
+// left/right = DAC output coding, centre = pause. Display: volume; dot =
+// paused. LEDs: 0 = NRZ, 1 = return-to-zero (see sigma_delta2), 4-7 = buffer
+// fill. NRZ is played 6 dB down so both codings give the same level.
 module pcm_player #(
     parameter int TICK      = 1000,   // 48 MHz / 48 kHz
     parameter int AW        = 12,     // 4096 samples = 16 KB = 85 ms
@@ -84,8 +86,8 @@ module pcm_player #(
 
     // ---- Controls
     logic [3:0] vol;
-    logic       paused;
-    controls #(.MS(MS)) u_ctl (.clk, .joy, .vol, .paused);
+    logic       paused, rz;
+    controls #(.MS(MS)) u_ctl (.clk, .joy, .vol, .paused, .rz);
 
     // ---- Playback at 48 kHz
     logic [$clog2(TICK)-1:0] div = '0;
@@ -143,14 +145,17 @@ module pcm_player #(
         prod_l <= smp_l * $signed({1'b0, gain});
         prod_r <= smp_r * $signed({1'b0, gain});
     end
-    sigma_delta2 u_dac_l (.clk, .x(prod_l[23:8]), .y(audio_l));
-    sigma_delta2 u_dac_r (.clk, .x(prod_r[23:8]), .y(audio_r));
+    // RZ swings half as far as NRZ: play NRZ 6 dB down to match.
+    wire signed [15:0] x_l = rz ? prod_l[23:8] : prod_l[24:9];
+    wire signed [15:0] x_r = rz ? prod_r[23:8] : prod_r[24:9];
+    sigma_delta2 u_dac_l (.clk, .rz, .x(x_l), .y(audio_l));
+    sigma_delta2 u_dac_r (.clk, .rz, .x(x_r), .y(audio_r));
     assign piezo = 2'b00;
 
     // ---- Status
     wire [7:0] fill = count[AW] ? 8'hFF : 8'(count[AW-1:0] >> (AW - 8));
     assign status = {
-        {idle, paused, count == '0, 1'b0, vol}, fill,
+        {idle, paused, count == '0, rz, vol}, fill,
         late_max, dropped, missed, underruns, rx_bytes, 8'h31, 8'h50
     };
 
@@ -165,7 +170,10 @@ module pcm_player #(
     always_ff @(posedge clk) begin
         seg0 <= (vol >= 4'd10) ? digit(4'd1) : 8'h00;
         seg1 <= digit((vol >= 4'd10) ? vol - 4'd10 : vol) | {paused, 7'b0};
-        for (int i = 0; i < 8; i++) led[i] <= fill > 8'(i * 32);
+        led[0] <= ~rz;
+        led[1] <= rz;
+        led[3:2] <= 2'b00;
+        for (int i = 0; i < 4; i++) led[4 + i] <= fill > 8'(i * 64);
     end
 endmodule
 
@@ -177,12 +185,13 @@ module controls #(
     input  logic       clk,
     input  logic [4:0] joy,            // {select, down, up, right, left}
     output logic [3:0] vol,
-    output logic       paused
+    output logic       paused,
+    output logic       rz              // DAC coding: 1 = return to zero
 );
     logic [$clog2(MS)-1:0] div = '0;
     logic [4:0] s1 = '0, s2 = '0, held = '0;
-    logic [3:0] v = 4'd12;
-    logic       p = 1'b0;
+    logic [3:0] v = 4'd14;
+    logic       p = 1'b0, z = 1'b1;
     wire  [4:0] press = s1 & s2 & ~held;
     always_ff @(posedge clk) begin
         div <= (div == $clog2(MS)'(MS - 1)) ? '0 : div + 1'b1;
@@ -190,11 +199,13 @@ module controls #(
             s1 <= joy;
             s2 <= s1;
             held <= s1 & s2;
-            if ((press[2] | press[1]) && v != 4'd15) v <= v + 4'd1;
-            if ((press[3] | press[0]) && v != 4'd0)  v <= v - 4'd1;
+            if (press[2] && v != 4'd15) v <= v + 4'd1;
+            if (press[3] && v != 4'd0)  v <= v - 4'd1;
+            if (press[1] | press[0]) z <= ~z;
             if (press[4]) p <= ~p;
         end
     end
     assign vol = v;
     assign paused = p;
+    assign rz = z;
 endmodule

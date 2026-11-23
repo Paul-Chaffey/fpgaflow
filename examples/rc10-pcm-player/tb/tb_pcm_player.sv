@@ -113,31 +113,31 @@ module tb_pcm_player;
                  string'(r[0]), string'(r[1]), {r[5], r[4], r[3], r[2]}, {r[7], r[6]}, {r[9], r[8]},
                  {r[11], r[10]}, {r[13], r[12]}, r[14], r[15]);
         if (r[0] != "P" || r[1] != "1" || {r[5], r[4], r[3], r[2]} != 4 * WORDS
-            || {r[11], r[10]} != 0 || r[14] != 0 || flags[5] != 1'b1) begin
+            || {r[11], r[10]} != 0 || r[14] != 0 || flags != 8'hBE) begin
             $display("FAIL: status"); errors++;
         end
         if ({r[13], r[12]} == 0) begin $display("FAIL: FULL was never exercised"); errors++; end
 
-        // The DAC: density of ones = 1/2 + x/2^16 with x = last left sample * gain/256.
-        begin
-            ones = 0; n = 65536;
-            last = sent[WORDS-1];
-            x = real'($signed(last[15:0])) * 82.0 / 256.0;
-            want = 0.5 + x / 65536.0;
-            repeat (n) begin @(posedge clk); ones += audio_l; end
-            got = real'(ones) / n;
-            $display("DAC: density %.4f, expected %.4f", got, want);
-            if (got - want > 0.002 || want - got > 0.002) begin $display("FAIL: DAC density"); errors++; end
-        end
-        // And the right channel, from the last right sample.
-        begin
-            ones = 0;
-            x = real'($signed(last[31:16])) * 82.0 / 256.0;
-            want = 0.5 + x / 65536.0;
-            repeat (n) begin @(posedge clk); ones += audio_r; end
-            got = real'(ones) / n;
-            $display("DAC right: density %.4f, expected %.4f", got, want);
-            if (got - want > 0.002 || want - got > 0.002) begin $display("FAIL: right DAC density"); errors++; end
+        // The DACs, in both codings: average output = 1/2 + x/2^17 with
+        // x = sample * gain/256 (volume step 14: gain 163). RZ is the default;
+        // the joystick's left switches to NRZ (played 6 dB down: same level).
+        last = sent[WORDS-1];
+        for (int mode = 0; mode < 2; mode++) begin
+            if (mode == 1) begin
+                joy[0] = 1; repeat (4 * 4) @(posedge clk); joy[0] = 0;
+                repeat (4 * 4 + 64) @(posedge clk);
+                if (dut.rz !== 1'b0) begin $display("FAIL: joystick left didn't select NRZ"); errors++; end
+            end
+            for (int ch = 0; ch < 2; ch++) begin
+                ones = 0; n = 65536;
+                x = real'($signed(ch == 0 ? last[15:0] : last[31:16])) * 163.0 / 256.0;
+                want = 0.5 + x / 131072.0;
+                repeat (n) begin @(posedge clk); ones += (ch == 0 ? audio_l : audio_r); end
+                got = real'(ones) / n;
+                $display("DAC %s %s: average %.4f, expected %.4f", mode == 0 ? "RZ " : "NRZ",
+                         ch == 0 ? "left " : "right", got, want);
+                if (got - want > 0.002 || want - got > 0.002) begin $display("FAIL: DAC"); errors++; end
+            end
         end
 
         if (errors == 0) $display("PASS");

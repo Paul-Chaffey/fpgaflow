@@ -14,11 +14,12 @@ Plug headphones or powered speakers into the RC10's audio output.
 
 | Joystick | |
 |---|---|
-| up / right | louder (16 steps of 3 dB; the display shows the step) |
-| down / left | quieter (0 = mute) |
+| up | louder (16 steps of 3 dB; the display shows the step) |
+| down | quieter (0 = mute) |
+| left / right | DAC output coding: return-to-zero (LED 1, default) or NRZ (LED 0) |
 | centre | pause (the dot lights; the PC waits) |
 
-The LEDs show how full the 85 ms buffer is.
+LEDs 4-7 show how full the 85 ms buffer is.
 
 ## How it works
 
@@ -31,9 +32,18 @@ The LEDs show how full the 85 ms buffer is.
   paces the PC: USB just waits.
 - Every 1000 clocks (48 kHz) a sample is played: scaled by the volume (one
   MULT18X18 per channel, top step 0.9 of full scale) and fed to a
-  second-order sigma-delta DAC per channel (`sigma_delta2`) running at
-  48 MHz into the board's RC filter. Modelled at 95-100 dB SNR in the audio
-  band; the board's analog output will be the limit.
+  second-order sigma-delta DAC per channel (`sigma_delta2`) into the board's
+  RC filter (150 R, 0.1 uF, then 220 uF to the jack). Modelled at ~100 dB in
+  the audio band with ideal edges.
+- Output coding. A pin's rising and falling edges never match exactly, and
+  every transition adds that mismatch. With plain NRZ at 48 MHz the number
+  of transitions follows the signal, so a mismatch of only 0.2 ns limits the
+  audio band to about 70 dB: audible hiss. Return-to-zero runs the modulator
+  at 12 MHz and sends each bit as four 48 MHz slots, `1 s s 0`: one rising
+  and one falling edge per bit whatever the data, so the mismatch becomes a
+  constant offset and the model stays at ~100 dB. RZ swings half as far, so
+  NRZ is played 6 dB down to make the two directly comparable (left/right on
+  the joystick). Noise on the 3.3 V I/O supply reaches the output either way.
 - A USB read returns a 16-byte status (bytes received, underruns, dropped
   bytes, how many bytes arrived after FULL rose, fill, volume, flags);
   `play` shows it while playing and reports it at the end.

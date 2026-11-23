@@ -153,6 +153,7 @@ struct PlayerStatus {
     idle: bool,
     paused: bool,
     empty: bool,
+    rz: bool,
     volume: u8,
 }
 
@@ -176,6 +177,7 @@ fn player_status(b: &fpgaflow_celoxica::Board) -> Result<PlayerStatus, Error> {
         idle: s[15] & 0x80 != 0,
         paused: s[15] & 0x40 != 0,
         empty: s[15] & 0x20 != 0,
+        rz: s[15] & 0x10 != 0,
         volume: s[15] & 0x0f,
     })
 }
@@ -253,11 +255,12 @@ fn play(file: &str) -> Result<(), Error> {
             let s = player_status(&b)?;
             let t = sent / RATE;
             print!(
-                "\r  {:>2}:{:02}  buffer {:>3}%  volume {:>2}{}  underruns {}   ",
+                "\r  {:>2}:{:02}  buffer {:>3}%  volume {:>2}  DAC {}{}  underruns {}   ",
                 t / 60,
                 t % 60,
                 s.fill as u32 * 100 / 255,
                 s.volume,
+                if s.rz { "RZ " } else { "NRZ" },
                 if s.paused { " (paused)" } else { "" },
                 s.underruns
             );
