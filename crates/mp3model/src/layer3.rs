@@ -232,8 +232,97 @@ pub fn requantize(g: &Granule, sf: &ScaleFactors, rate: usize, is: &[i32; 576]) 
     xr
 }
 
+/// Which samples are intensity-coded, and with which position (0..6; 7 is
+/// "illegal" and means the band is coded normally, so it never appears).
+/// Intensity starts above the right channel's last non-zero band (per window
+/// for short blocks).
+pub fn intensity_positions(
+    g: &Granule,
+    sf_r: &ScaleFactors,
+    rate: usize,
+    is_r: &[i32; 576],
+) -> [Option<u8>; 576] {
+    let mut pos = [None; 576];
+    let mark = |lo: usize, hi: usize, p: u8, pos: &mut [Option<u8>; 576]| {
+        if p != 7 {
+            for x in &mut pos[lo..hi] {
+                *x = Some(p);
+            }
+        }
+    };
+    if !is_short(g) {
+        let start = match is_r.iter().rposition(|&v| v != 0) {
+            None => 0,
+            Some(i) => band_of(&SFB_LONG[rate], i) + 1,
+        };
+        for band in start..22 {
+            mark(
+                SFB_LONG[rate][band] as usize,
+                SFB_LONG[rate][band + 1] as usize,
+                sf_r.long[band.min(20)],
+                &mut pos,
+            );
+        }
+        return pos;
+    }
+    let first_short = if g.mixed_block { 3 } else { 0 };
+    let mut short_part_zero = true;
+    for w in 0..3 {
+        // Last non-zero band in this window (coded order: band, window).
+        let mut start = first_short;
+        for band in (first_short..13).rev() {
+            let (lo, hi) = (
+                SFB_SHORT[rate][band] as usize,
+                SFB_SHORT[rate][band + 1] as usize,
+            );
+            let base = 3 * lo + w * (hi - lo);
+            if is_r[base..base + hi - lo].iter().any(|&v| v != 0) {
+                start = band + 1;
+                break;
+            }
+        }
+        if start > first_short {
+            short_part_zero = false;
+        }
+        for band in start..13 {
+            let (lo, hi) = (
+                SFB_SHORT[rate][band] as usize,
+                SFB_SHORT[rate][band + 1] as usize,
+            );
+            let base = 3 * lo + w * (hi - lo);
+            mark(base, base + hi - lo, sf_r.short[band.min(11)][w], &mut pos);
+        }
+    }
+    if g.mixed_block && short_part_zero {
+        // Nothing in any short window: intensity may start in the long part.
+        let start = match is_r[..36].iter().rposition(|&v| v != 0) {
+            None => 0,
+            Some(i) => band_of(&SFB_LONG[rate], i) + 1,
+        };
+        for band in start..8 {
+            mark(
+                SFB_LONG[rate][band] as usize,
+                SFB_LONG[rate][band + 1] as usize,
+                sf_r.long[band],
+                &mut pos,
+            );
+        }
+    }
+    pos
+}
+
+/// Intensity stereo gains (k_left, k_right) for position 0..6.
+pub fn intensity_gains(p: u8) -> (f64, f64) {
+    if p == 6 {
+        (1.0, 0.0)
+    } else {
+        let t = (p as f64 * PI / 12.0).tan();
+        (t / (1.0 + t), 1.0 / (1.0 + t))
+    }
+}
+
 /// Joint stereo: intensity (above the right channel's last non-zero band)
-/// and mid/side (below it, or everywhere without intensity).
+/// and mid/side (everywhere else).
 #[allow(clippy::too_many_arguments)]
 pub fn stereo(
     g: &Granule, // right channel's granule (both share block type in joint stereo)
@@ -245,108 +334,22 @@ pub fn stereo(
     l: &mut [f64; 576],
     r: &mut [f64; 576],
 ) {
-    // done[i]: sample i was handled by intensity stereo.
-    let mut done = [false; 576];
-    if intensity {
-        let mut apply = |lo: usize, hi: usize, pos: u8, step: usize, done: &mut [bool; 576]| {
-            if pos == 7 {
-                return; // "illegal" position: this band is coded normally
-            }
-            let (kl, kr) = if pos == 6 {
-                (1.0, 0.0)
-            } else {
-                let t = (pos as f64 * PI / 12.0).tan();
-                (t / (1.0 + t), 1.0 / (1.0 + t))
-            };
-            let mut i = lo;
-            while i < hi {
-                let v = l[i];
-                l[i] = v * kl;
-                r[i] = v * kr;
-                done[i] = true;
-                i += step;
-            }
-        };
-        let last_nonzero = is_r.iter().rposition(|&v| v != 0);
-        if !is_short(g) {
-            // Long blocks: from the band after the last non-zero value.
-            let start = match last_nonzero {
-                None => 0,
-                Some(i) => band_of(&SFB_LONG[rate], i) + 1,
-            };
-            for band in start..22 {
-                let pos = sf_r.long[band.min(20)];
-                apply(
-                    SFB_LONG[rate][band] as usize,
-                    SFB_LONG[rate][band + 1] as usize,
-                    pos,
-                    1,
-                    &mut done,
-                );
-            }
-        } else {
-            let first_short = if g.mixed_block { 3 } else { 0 };
-            let mut long_part_zero = true;
-            for w in 0..3 {
-                // Last non-zero band in this window (coded order: band, window).
-                let mut start = first_short;
-                for band in (first_short..13).rev() {
-                    let (lo, hi) = (
-                        SFB_SHORT[rate][band] as usize,
-                        SFB_SHORT[rate][band + 1] as usize,
-                    );
-                    let width = hi - lo;
-                    let base = 3 * lo + w * width;
-                    if is_r[base..base + width].iter().any(|&v| v != 0) {
-                        start = band + 1;
-                        break;
-                    }
-                }
-                if start > first_short {
-                    long_part_zero = false;
-                }
-                for band in start..13 {
-                    let (lo, hi) = (
-                        SFB_SHORT[rate][band] as usize,
-                        SFB_SHORT[rate][band + 1] as usize,
-                    );
-                    let width = hi - lo;
-                    let base = 3 * lo + w * width;
-                    apply(
-                        base,
-                        base + width,
-                        sf_r.short[band.min(11)][w],
-                        1,
-                        &mut done,
-                    );
-                }
-            }
-            if g.mixed_block && long_part_zero {
-                // Nothing in any short window: intensity may start in the long part.
-                let start = match is_r[..36].iter().rposition(|&v| v != 0) {
-                    None => 0,
-                    Some(i) => band_of(&SFB_LONG[rate], i) + 1,
-                };
-                for band in start..8 {
-                    apply(
-                        SFB_LONG[rate][band] as usize,
-                        SFB_LONG[rate][band + 1] as usize,
-                        sf_r.long[band],
-                        1,
-                        &mut done,
-                    );
-                }
-            }
-        }
-    }
-    if ms {
-        let s = std::f64::consts::FRAC_1_SQRT_2;
-        for i in 0..576 {
-            if !done[i] {
-                let (m, d) = (l[i], r[i]);
-                l[i] = (m + d) * s;
-                r[i] = (m - d) * s;
-            }
+    let pos = if intensity {
+        intensity_positions(g, sf_r, rate, is_r)
+    } else {
+        [None; 576]
+    };
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    for i in 0..576 {
+        if let Some(p) = pos[i] {
+            let (kl, kr) = intensity_gains(p);
+            let v = l[i];
+            l[i] = v * kl;
+            r[i] = v * kr;
+        } else if ms {
+            let (m, d) = (l[i], r[i]);
+            l[i] = (m + d) * s;
+            r[i] = (m - d) * s;
         }
     }
 }
@@ -477,11 +480,16 @@ pub fn imdct(g: &Granule, xr: &[f64; 576], overlap: &mut [[f64; 18]; 32]) -> [f6
 /// Polyphase synthesis filterbank state for one channel.
 pub struct Synth {
     v: [f64; 1024],
+    /// Largest |V| computed so far (for choosing fixed-point formats).
+    pub v_peak: f64,
 }
 
 impl Default for Synth {
     fn default() -> Self {
-        Synth { v: [0.0; 1024] }
+        Synth {
+            v: [0.0; 1024],
+            v_peak: 0.0,
+        }
     }
 }
 
@@ -501,6 +509,7 @@ impl Synth {
         for i in 0..64 {
             self.v[i] = (0..32).map(|k| n[i * 32 + k] * s[k]).sum();
         }
+        self.v_peak = self.v[..64].iter().fold(self.v_peak, |m, v| m.max(v.abs()));
         let mut out = [0.0; 32];
         for (j, o) in out.iter_mut().enumerate() {
             let mut acc = 0.0;

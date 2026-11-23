@@ -63,8 +63,8 @@ clock needs at most 320 k clocks per second.
 | PCM FIFO to the DACs | 2 |
 | **Total** | **23 of 32** |
 
-**Multipliers:** about 10 of 32, counting two per 24×18-bit MAC and the
-volume control.
+**Multipliers:** about 10 of 32: two per 26×18-bit MAC (requantise,
+stereo/antialias, IMDCT, synthesis) and the volume control.
 
 **Logic:** estimated 4,000-7,000 slices (30-50%). Huffman and side-info
 control is the largest part. This is a guess until the first stages are
@@ -82,6 +82,36 @@ decoder on its test streams:
 Aim for full. The fixed-point model (below) decides the widths. Start from
 24-bit data and 18-bit coefficients, i.e. two MULT18X18 per product, and
 check whether 18-bit data (one multiplier) is enough.
+
+**Decided 2026-11-24** (`mp3model fixed`, over all 55 test streams: 45
+LAME/shine and the 10 ISO Layer III streams):
+
+| Data | Coefficient | Mantissa | RMS / limit | worst / limit | 16-bit out | |
+|---|---|---|---|---|---|---|
+| 24 | 18 | 18 | 0.81 | 1.60 | ±3 LSB | limited only |
+| **26** | **18** | **18** | **0.53** | **0.67** | **±2 LSB** | **full** |
+| 26 | 19 | 18 | 0.41 | 0.46 | ±1 LSB | full |
+
+- **Data: 26 bits**, 3 integer bits + sign (22 fraction bits). Values reach
+  about 7.9 of full scale in the ISO "he" streams, so nothing clips inside.
+  At 24 bits a granule with large values that cancel to a small output is
+  off by 1.6x the limit.
+- **Coefficients: 18-bit signed, 17 fraction bits**, the MULT18X18's native
+  width. Every coefficient (IMDCT cosine x window, synthesis matrix,
+  antialias, mid/side, intensity) lies in [-1, 1); intensity position 6
+  (gain exactly 1) is a pass-through. Coefficients, not data, are the limit
+  here: 27-bit data gains nothing.
+- **|n|^(4/3): 18-bit normalised mantissas**, a table for n < 1024 and
+  linear interpolation between multiples of 8 above that, times an 18-bit
+  2^(k/4).
+- **Synthesis window:** the standard's exact integers (D x 2^16 fits 18 bits
+  signed).
+- A 26 x 18 product is **two MULT18X18** (data split into a 9-bit signed
+  upper and a 17-bit unsigned lower part), summed in a wide accumulator and
+  rounded once.
+- The DACs should take more than 16 bits: a 16-bit output alone puts the RMS
+  error at the full-accuracy limit. The decoder's PCM has 22 fraction bits;
+  20 of them go to the sigma-delta.
 
 ## Clocks
 

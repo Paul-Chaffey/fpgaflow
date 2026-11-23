@@ -10,6 +10,7 @@
 #![allow(clippy::needless_range_loop)]
 
 pub mod bits;
+pub mod fixed;
 pub mod frame;
 pub mod layer3;
 pub mod tables;
@@ -92,7 +93,7 @@ pub fn find_frames(data: &[u8]) -> Vec<(usize, Header)> {
 pub struct Decoder {
     reservoir: Vec<u8>,
     overlap: [[[f64; 18]; 32]; 2],
-    synth: [Synth; 2],
+    pub synth: [Synth; 2],
 }
 
 impl Default for Decoder {
