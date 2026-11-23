@@ -1,0 +1,26 @@
+[project]
+name = "rc10-usb-probe"
+top = "usb_probe"
+
+[sources]
+rtl = ["rtl/**/*.sv"]
+tb = ["tb/**/*.sv"]
+
+[sim]
+tool = "icarus"
+tb_top = "tb_usb_probe"
+wave = "fst"
+
+# Celoxica RC10 (XC3S1500-4FG320). Measures the FX2's GPIF bus timing for
+# streaming over USB: see README.md.
+[target]
+board = "rc10"
+family = "spartan3"
+device = "xc3s1500"
+package = "fg320"
+speed = "4"
+backend = "ise"
+constraints = ["constraints/rc10-usb-probe.ucf"]
+
+[program]
+mode = "sram"

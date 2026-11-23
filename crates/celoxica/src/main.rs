@@ -14,7 +14,7 @@ use std::time::Instant;
 
 use fpgaflow_celoxica::{check_bitstream, Board, Error};
 
-const USAGE: &str = "usage: fpgaflow-celoxica status | load FILE.bit | flash-list | flash-read OUT.tar | flash-write FILE.bit [INDEX] | --version";
+const USAGE: &str = "usage: fpgaflow-celoxica status | load FILE.bit | flash-list | flash-read OUT.tar | flash-write FILE.bit [INDEX] | usb-write FILE | usb-read N [OUT] | --version";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -26,6 +26,14 @@ fn main() -> ExitCode {
         ["status"] => status(),
         ["load", file] => load(file),
         ["flash-list"] => flash_list(),
+        ["usb-write", file] => usb_write(file),
+        ["usb-read", n] | ["usb-read", n, _] => match n.parse() {
+            Ok(n) => usb_read(n, args.get(2).map(String::as_str)),
+            Err(_) => {
+                eprintln!("{USAGE}");
+                return ExitCode::from(2);
+            }
+        },
         ["flash-read", out] => flash_read(out),
         ["flash-write", file] => flash_write(file, fpgaflow_celoxica::BOOT_FILE),
         ["flash-write", file, index] => match index.parse() {
@@ -102,6 +110,35 @@ fn describe(data: &[u8]) -> String {
         (Some(d), Some(p)) => format!("bitstream {d}, part {p}"),
         _ => "data".to_string(),
     }
+}
+
+/// Send a file's bytes to the running FPGA design (alternate setting 2).
+fn usb_write(file: &str) -> Result<(), Error> {
+    let data = std::fs::read(file).map_err(|e| Error::File(file.to_string(), e))?;
+    let b = open()?;
+    let sent = b.usb_write(&data, std::time::Duration::from_secs(2))?;
+    println!("sent {sent} of {} bytes to the FPGA", data.len());
+    b.normal_mode()
+}
+
+/// Read `n` bytes from the running FPGA design: hex dump, or into `out`.
+fn usb_read(n: usize, out: Option<&str>) -> Result<(), Error> {
+    let b = open()?;
+    let data = b.usb_read(n, std::time::Duration::from_secs(2))?;
+    b.normal_mode()?;
+    match out {
+        Some(o) => {
+            std::fs::write(o, &data).map_err(|e| Error::File(o.to_string(), e))?;
+            println!("read {} bytes into {o}", data.len());
+        }
+        None => {
+            for (i, row) in data.chunks(16).enumerate() {
+                let hex: Vec<String> = row.iter().map(|b| format!("{b:02x}")).collect();
+                println!("{:06x}: {}", i * 16, hex.join(" "));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn flash_list() -> Result<(), Error> {

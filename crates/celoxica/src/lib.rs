@@ -31,6 +31,19 @@
 //! Reading uses only `04` and `00`. Nothing else is sent: not Celoxica's
 //! format, clock or RAM commands, and not `0xA0` (the FX2's firmware loader),
 //! so the FX2 firmware is never touched.
+//!
+//! Streaming data to and from a running FPGA design (`RCUSBWrite` /
+//! `RCUSBRead`, Celoxica's "mode 1") uses alternate setting 2:
+//!
+//! | direction | USB transfer |
+//! |---|---|
+//! | host to FPGA | bulk OUT EP `0x02` |
+//! | FPGA to host | vendor OUT `0x43` `0A, length (BE16)` (<= 0xFE00), then bulk IN `length` on EP `0x86` |
+//!
+//! On the FPGA side the FX2's GPIF drives the bus (see `docs/rc10/usb-protocol.md`):
+//! nCS (T14) and nWR (V4) low = a byte on D\[7:0\] for the FPGA; nCS low with
+//! nWR high = the FX2 reads D\[7:0\]. The FPGA paces it with FX2_FULL (R14:
+//! stop sending) and FX2_EMPTY (P14: nothing to read).
 
 use std::time::{Duration, Instant};
 
@@ -58,6 +71,11 @@ const REQ_COMMAND: u8 = 0x43;
 const EP_IN: u8 = 0x86;
 /// Alternate setting for flash access (Celoxica's "mode 2").
 const ALT_FLASH: u8 = 1;
+/// Alternate setting for streaming to and from the FPGA design.
+const ALT_DATA: u8 = 2;
+/// Command `0A`: read this many bytes from the FPGA design.
+const CMD_FPGA_READ: u8 = 0x0a;
+const DATA_READ_CHUNK: usize = 0xfe00;
 /// Flash file numbers the RC10 uses.
 pub const FLASH_FILES: std::ops::RangeInclusive<u8> = 1..=254;
 /// The file the FX2 loads into the FPGA at power-up / reset.
@@ -265,14 +283,16 @@ impl Board {
 
     /// Read exactly `n` bytes from the bulk IN endpoint.
     fn read_exact(&self, n: usize) -> Result<Vec<u8>, Error> {
+        self.read_exact_within(n, FLASH_TIMEOUT)
+    }
+
+    fn read_exact_within(&self, n: usize, timeout: Duration) -> Result<Vec<u8>, Error> {
         let mut out = Vec::with_capacity(n);
         // Buffers are whole 512-byte packets so a full packet never overflows.
         let mut buf = vec![0u8; n.div_ceil(512).max(1) * 512];
         while out.len() < n {
             let want = (n - out.len()).div_ceil(512) * 512;
-            let got = self
-                .handle
-                .read_bulk(EP_IN, &mut buf[..want], FLASH_TIMEOUT)?;
+            let got = self.handle.read_bulk(EP_IN, &mut buf[..want], timeout)?;
             if got == 0 {
                 return Err(Error::Usb(rusb::Error::Io));
             }
@@ -365,6 +385,48 @@ impl Board {
             sent += chunk.len();
         }
         Ok(())
+    }
+}
+
+impl Board {
+    fn data_mode(&self) -> Result<(), Error> {
+        self.handle.set_alternate_setting(0, ALT_DATA)?;
+        Ok(())
+    }
+
+    /// Send `data` to the running FPGA design. Returns how many bytes the
+    /// FX2 accepted before `timeout` (fewer if the design held FX2_FULL).
+    pub fn usb_write(&self, data: &[u8], timeout: Duration) -> Result<usize, Error> {
+        self.data_mode()?;
+        let mut off = 0;
+        while off < data.len() {
+            let end = (off + CHUNK).min(data.len());
+            match self
+                .handle
+                .write_bulk(EP_BITSTREAM, &data[off..end], timeout)
+            {
+                Ok(n) => off += n,
+                Err(rusb::Error::Timeout) => break,
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Ok(off)
+    }
+
+    /// Read `n` bytes from the running FPGA design. Times out if the design
+    /// keeps FX2_EMPTY high.
+    pub fn usb_read(&self, n: usize, timeout: Duration) -> Result<Vec<u8>, Error> {
+        self.data_mode()?;
+        let mut out = Vec::with_capacity(n);
+        while out.len() < n {
+            let k = DATA_READ_CHUNK.min(n - out.len());
+            let mut p = [0u8; 10];
+            p[0] = CMD_FPGA_READ;
+            p[1..3].copy_from_slice(&(k as u16).to_be_bytes());
+            self.command(p)?;
+            out.extend(self.read_exact_within(k, timeout)?);
+        }
+        Ok(out)
     }
 }
 

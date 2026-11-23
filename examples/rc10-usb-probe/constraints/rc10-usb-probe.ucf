@@ -1,0 +1,48 @@
+# RC10 USB probe pins (lines from data/boards/rc10.ucf, nets renamed).
+# 48 MHz IFCLK from the FX2 (bank 4, 3.3 V)
+NET "clk" LOC = "P10" | IOSTANDARD = LVCMOS33 ;
+NET "clk" PERIOD = 20.833ns HIGH 50%;
+# FX2 GPIF bus (banks 4/5, 3.3 V). D[7:0] is shared with the NAND flash; the
+# design drives it only while nCS is low and nWR high.
+NET "fx2_d<7>"  LOC = "U13" | IOSTANDARD = LVCMOS33 ;
+NET "fx2_d<6>"  LOC = "T11" | IOSTANDARD = LVCMOS33 ;
+NET "fx2_d<5>"  LOC = "P12" | IOSTANDARD = LVCMOS33 ;
+NET "fx2_d<4>"  LOC = "R11" | IOSTANDARD = LVCMOS33 ;
+NET "fx2_d<3>"  LOC = "T8"  | IOSTANDARD = LVCMOS33 ;
+NET "fx2_d<2>"  LOC = "V8"  | IOSTANDARD = LVCMOS33 ;
+NET "fx2_d<1>"  LOC = "R8"  | IOSTANDARD = LVCMOS33 ;
+NET "fx2_d<0>"  LOC = "R6"  | IOSTANDARD = LVCMOS33 ;
+NET "fx2_ncs"   LOC = "T14" | IOSTANDARD = LVCMOS33 ;   # GPIF CTL2
+NET "fx2_nwr"   LOC = "V4"  | IOSTANDARD = LVCMOS33 ;   # GPIF CTL1
+NET "fx2_full"  LOC = "R14" | IOSTANDARD = LVCMOS33 ;   # GPIF RDY1
+NET "fx2_empty" LOC = "P14" | IOSTANDARD = LVCMOS33 ;   # GPIF RDY0
+# Joystick, LEDs, 7-segment (as in rc10-music)
+NET "joy<4>" LOC = "B10" | IOSTANDARD = LVCMOS33 ;   # JOY_SELECT
+NET "joy<3>" LOC = "A11" | IOSTANDARD = LVCMOS33 ;   # JOY_DOWN
+NET "joy<2>" LOC = "B13" | IOSTANDARD = LVCMOS33 ;   # JOY_UP
+NET "joy<1>" LOC = "D10" | IOSTANDARD = LVCMOS33 ;   # JOY_RIGHT
+NET "joy<0>" LOC = "A10" | IOSTANDARD = LVCMOS33 ;   # JOY_LEFT
+NET "led<0>" LOC = "D2" | IOSTANDARD = LVCMOS25 | SLEW = SLOW | DRIVE = 8 ;
+NET "led<1>" LOC = "D3" | IOSTANDARD = LVCMOS25 | SLEW = SLOW | DRIVE = 8 ;
+NET "led<2>" LOC = "E1" | IOSTANDARD = LVCMOS25 | SLEW = SLOW | DRIVE = 8 ;
+NET "led<3>" LOC = "E2" | IOSTANDARD = LVCMOS25 | SLEW = SLOW | DRIVE = 8 ;
+NET "led<4>" LOC = "E3" | IOSTANDARD = LVCMOS25 | SLEW = SLOW | DRIVE = 8 ;
+NET "led<5>" LOC = "F2" | IOSTANDARD = LVCMOS25 | SLEW = SLOW | DRIVE = 8 ;
+NET "led<6>" LOC = "F4" | IOSTANDARD = LVCMOS25 | SLEW = SLOW | DRIVE = 8 ;
+NET "led<7>" LOC = "G3" | IOSTANDARD = LVCMOS25 | SLEW = SLOW | DRIVE = 8 ;
+NET "seg0<0>" LOC = "H2" | IOSTANDARD = LVCMOS25 ;   # a
+NET "seg0<1>" LOC = "H3" | IOSTANDARD = LVCMOS25 ;   # b
+NET "seg0<2>" LOC = "H6" | IOSTANDARD = LVCMOS25 ;   # c
+NET "seg0<3>" LOC = "H5" | IOSTANDARD = LVCMOS25 ;   # d
+NET "seg0<4>" LOC = "G5" | IOSTANDARD = LVCMOS25 ;   # e
+NET "seg0<5>" LOC = "G4" | IOSTANDARD = LVCMOS25 ;   # f
+NET "seg0<6>" LOC = "H1" | IOSTANDARD = LVCMOS25 ;   # g
+NET "seg0<7>" LOC = "C2" | IOSTANDARD = LVCMOS25 ;   # dp
+NET "seg1<0>" LOC = "J1" | IOSTANDARD = LVCMOS25 ;   # a
+NET "seg1<1>" LOC = "J2" | IOSTANDARD = LVCMOS25 ;   # b
+NET "seg1<2>" LOC = "K2" | IOSTANDARD = LVCMOS25 ;   # c
+NET "seg1<3>" LOC = "C3" | IOSTANDARD = LVCMOS25 ;   # d
+NET "seg1<4>" LOC = "C1" | IOSTANDARD = LVCMOS25 ;   # e
+NET "seg1<5>" LOC = "H4" | IOSTANDARD = LVCMOS25 ;   # f
+NET "seg1<6>" LOC = "B1" | IOSTANDARD = LVCMOS25 ;   # g
+NET "seg1<7>" LOC = "J4" | IOSTANDARD = LVCMOS25 ;   # dp
