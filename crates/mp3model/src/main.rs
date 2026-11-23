@@ -2,12 +2,13 @@
 //!
 //!   mp3model decode IN.mp3 OUT.raw   16-bit little-endian PCM, interleaved
 //!   mp3model compare IN.mp3          against ffmpeg's float decoder (ISO 11172-4 limits)
+//!   mp3model compare-pcm IN REF.pcm  against a 16-bit reference output (ISO conformance)
 //!   mp3model info IN.mp3             which coding features the stream uses
 
 use std::process::{Command, ExitCode};
 
 use anyhow::{bail, Context, Result};
-use fpgaflow_mp3model::{decode_file, find_frames, Decoder};
+use fpgaflow_mp3model::{decode_file, decode_file_with, find_frames, Decoder};
 
 /// ISO/IEC 11172-4 decoder accuracy, full scale = 1.
 const FULL_RMS: f64 = 1.0 / 32768.0 / 3.4641016151377544; // 2^-15 / sqrt(12)
@@ -20,8 +21,12 @@ fn main() -> ExitCode {
         ["decode", input, out] => decode(input, out),
         ["compare", input] => compare(input).map(|_| ()),
         ["info", input] => info(input),
+        ["compare-pcm", input, reference] => compare_pcm(input, reference),
         _ => {
-            eprintln!("usage: mp3model decode IN.mp3 OUT.raw | compare IN.mp3 | info IN.mp3");
+            eprintln!(
+                "usage: mp3model decode IN.mp3 OUT.raw | compare IN.mp3 | \
+                 compare-pcm IN.mp3 REF.pcm | info IN.mp3"
+            );
             return ExitCode::from(2);
         }
     };
@@ -238,6 +243,48 @@ fn compare(input: &str) -> Result<Comparison> {
         bail!("output differs from ffmpeg's");
     }
     Ok(Comparison { rms, max })
+}
+
+/// Against a reference decoder's 16-bit output (the ISO 11172-4 streams come
+/// with one): our output rounded to 16 bits, differences in LSBs.
+fn compare_pcm(input: &str, reference: &str) -> Result<()> {
+    let (_, nch, ours) = decode_file_with(&read(input)?, false)?;
+    let refs: Vec<i16> = read(reference)?
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&b| i16::from_le_bytes(b))
+        .collect();
+    let n = ours.len().min(refs.len());
+    let mut hist = [0usize; 3]; // |diff| = 0, 1, > 1
+    let (mut sum, mut max, mut first_bad) = (0.0, 0i32, None);
+    for i in 0..n {
+        let d = to_s16(ours[i]) as i32 - refs[i] as i32;
+        hist[(d.unsigned_abs() as usize).min(2)] += 1;
+        sum += (d * d) as f64;
+        if d.abs() > max {
+            max = d.abs();
+        }
+        if d.abs() > 1 && first_bad.is_none() {
+            first_bad = Some(i / nch);
+        }
+    }
+    println!(
+        "{input}: {nch} ch, {} vs {} reference samples; exact {}, \u{b1}1 LSB {}, worse {}; RMS {:.3} LSB, max {} LSB{}",
+        ours.len(),
+        refs.len(),
+        hist[0],
+        hist[1],
+        hist[2],
+        (sum / n.max(1) as f64).sqrt(),
+        max,
+        first_bad.map(|f| format!(" (first at sample {f}, frame {})", f / 1152)).unwrap_or_default()
+    );
+    // The reference decoder doesn't emit the last frame.
+    if hist[2] > 0 || ours.len() < refs.len() || ours.len() > refs.len() + 1152 * nch {
+        bail!("differs from the reference");
+    }
+    Ok(())
 }
 
 fn info(input: &str) -> Result<()> {

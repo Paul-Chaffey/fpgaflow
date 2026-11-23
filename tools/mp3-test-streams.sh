@@ -34,3 +34,16 @@ for s in tones sweep clicks noise $( [ -f "$out/src/music.wav" ] && echo music )
     ff -i "$out/src/$s.wav" -c:a libshine -b:a 128k "$out/$s-shine-128.mp3"
 done
 ls "$out"/*.mp3 | wc -l
+
+# The ISO/IEC 11172-4 Layer III conformance streams and their reference
+# decoder outputs, as mirrored in minimp3's repository (ISO's material: kept
+# out of git). Free format (he_free) is outside the decoder's scope.
+iso=build/iso-l3
+mkdir -p "$iso"
+for n in compl he_32khz he_44khz he_48khz he_mode hecommon si si_block si_huff sin1k0db; do
+    for e in bit pcm; do
+        [ -s "$iso/$n.$e" ] || curl -sSfL -o "$iso/$n.$e" \
+            "https://raw.githubusercontent.com/lieff/minimp3/master/vectors/l3-$n.$e"
+    done
+done
+ls "$iso"/*.bit | wc -l

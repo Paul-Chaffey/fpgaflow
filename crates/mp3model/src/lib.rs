@@ -194,6 +194,12 @@ impl Decoder {
 /// Decode a whole file. Frames that can't be decoded give silence, so the
 /// output keeps its timing. Returns (sample rate, channels, interleaved PCM).
 pub fn decode_file(data: &[u8]) -> anyhow::Result<(u32, usize, Vec<f64>)> {
+    decode_file_with(data, true)
+}
+
+/// As [`decode_file`]; with `keep_timing` false, frames that can't be
+/// decoded are left out (as the ISO reference decoder does).
+pub fn decode_file_with(data: &[u8], keep_timing: bool) -> anyhow::Result<(u32, usize, Vec<f64>)> {
     let frames = find_frames(data);
     let Some(&(_, first)) = frames.first() else {
         anyhow::bail!("no MPEG-1 Layer III frames found");
@@ -204,7 +210,8 @@ pub fn decode_file(data: &[u8]) -> anyhow::Result<(u32, usize, Vec<f64>)> {
         let bytes = &data[pos..pos + h.frame_len()];
         match d.decode_frame(bytes) {
             Some(f) => pcm.extend(f.pcm()),
-            None => pcm.extend(std::iter::repeat_n(0.0, 1152 * h.channels())),
+            None if keep_timing => pcm.extend(std::iter::repeat_n(0.0, 1152 * h.channels())),
+            None => {}
         }
     }
     Ok((first.sample_rate(), first.channels(), pcm))
