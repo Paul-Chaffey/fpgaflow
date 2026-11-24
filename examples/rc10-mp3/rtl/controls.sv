@@ -20,7 +20,9 @@ module controls #(
     input  logic       set_bass,
     input  logic [1:0] bass_val,
     input  logic       set_pause,
-    input  logic       pause_val
+    input  logic       pause_val,
+    input  logic       set_vol,
+    input  logic [3:0] vol_val
 );
     logic [$clog2(MS)-1:0] div = '0;
     logic [4:0] s1 = '0, s2 = '0, held = '0;
@@ -47,7 +49,9 @@ module controls #(
         end
         if (set_bass) b <= bass_val;
         if (set_pause) p <= pause_val;
-        vol_key <= div == '0 && (press[2] || press[3]);
+        if (set_vol) v <= vol_val;
+        // (the display shows the volume after a press or a change from the host)
+        vol_key <= (div == '0 && (press[2] || press[3])) || set_vol;
         bass_key <= div == '0 && press[0];
     end
     assign vol = v;

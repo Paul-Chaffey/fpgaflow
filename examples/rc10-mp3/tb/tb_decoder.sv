@@ -27,14 +27,15 @@ module tb_decoder;
 
     // The stream as the host sends it: records, through the demux (stage 2
     // of the EQ plan). Settings records go to the demux's outputs only.
-    logic mp3_valid, cw_en, eq_on, eq_bank, set_bass, set_pause, pause_val;
+    logic mp3_valid, cw_en, eq_on, eq_bank, set_bass, set_pause, pause_val, set_vol;
+    logic [3:0] vol_val;
     logic [7:0] mp3_data, eq_sets, settings;
     logic [6:0] cw_addr;
     logic [24:0] cw_data;
     logic [1:0] bass_val;
     stream_demux dmx (.clk, .new_stream, .rx_valid(in_valid), .rx_data(in_data), .mp3_valid, .mp3_data,
                       .cw_en, .cw_addr, .cw_data, .eq_on, .eq_bank, .set_bass, .bass_val,
-                      .set_pause, .pause_val, .eq_sets, .settings);
+                      .set_pause, .pause_val, .set_vol, .vol_val, .eq_sets, .settings);
     mp3_frontend dut (.clk, .in_valid(mp3_valid), .in_data(mp3_data), .new_stream, .idle, .full,
                       .rec_valid, .rec_data, .frames, .frame_bytes, .undecodable,
                       .crc, .last_header, .fill, .res_raddr, .res_rdata,
@@ -255,7 +256,7 @@ module tb_decoder;
             pos = 0;
             while (pos < mp3q.size()) begin
                 if ($urandom % 6 == 0) begin
-                    kind = $urandom % 4;
+                    kind = $urandom % 5;
                     if (kind == 0) begin                       // EQ set: 200 bytes
                         fq.push_back(8'd1); fq.push_back(8'd0); fq.push_back(8'd200);
                         repeat (200) fq.push_back(8'($urandom));
@@ -268,8 +269,12 @@ module tb_decoder;
                         fq.push_back(8'd3); fq.push_back(8'd0); fq.push_back(8'd1);
                         fq.push_back(8'($urandom % 2));
                         want_settings = want_settings + 1;
-                    end else begin                             // EQ off
+                    end else if (kind == 3) begin              // EQ off
                         fq.push_back(8'd4); fq.push_back(8'd0); fq.push_back(8'd0);
+                        want_settings = want_settings + 1;
+                    end else begin                             // volume
+                        fq.push_back(8'd5); fq.push_back(8'd0); fq.push_back(8'd1);
+                        fq.push_back(8'($urandom % 16));
                         want_settings = want_settings + 1;
                     end
                 end

@@ -41,7 +41,7 @@
 //   62    rate the DACs play at: 0 = 44.1, 1 = 48, 2 = 32 kHz
 //   63    C3
 //   64    EQ coefficient sets taken (wrapping)
-//   65    other settings records taken (bass, pause, EQ off; wrapping)
+//   65    other settings records taken (bass, pause, EQ off, volume; wrapping)
 //   66    {5'b0, paused by the host, EQ on, EQ bank in use}
 //   67    0
 //   68-87 left band levels, 31 Hz..16 kHz (16-bit LE, peak envelope in sample
@@ -100,7 +100,8 @@ module mp3_top #(
     logic [12:0] fill;
     // The stream's records: MP3 bytes to the front end, settings to the
     // controls and the EQ (rtl/stream_demux.sv).
-    logic        mp3_valid, cw_en, eq_on, eq_bank, set_bass, set_pause, pause_val;
+    logic        mp3_valid, cw_en, eq_on, eq_bank, set_bass, set_pause, pause_val, set_vol;
+    logic [3:0]  vol_val;
     logic [7:0]  mp3_data, eq_sets, settings;
     logic [6:0]  cw_addr;
     logic [24:0] cw_data;
@@ -108,7 +109,7 @@ module mp3_top #(
     stream_demux u_dmx (
         .clk, .new_stream, .rx_valid, .rx_data, .mp3_valid, .mp3_data,
         .cw_en, .cw_addr, .cw_data, .eq_on, .eq_bank,
-        .set_bass, .bass_val, .set_pause, .pause_val, .eq_sets, .settings
+        .set_bass, .bass_val, .set_pause, .pause_val, .set_vol, .vol_val, .eq_sets, .settings
     );
     mp3_frontend u_fe (
         .clk, .in_valid(mp3_valid), .in_data(mp3_data), .new_stream, .idle, .full,
@@ -169,7 +170,8 @@ module mp3_top #(
     logic       vol_key, bass_key;
     logic [1:0] bass;
     controls #(.MS(MS), .VOL0(VOL0)) u_ctl (.clk, .joy, .vol, .paused, .rz, .vol_key, .bass, .bass_key,
-                                            .set_bass, .bass_val, .set_pause, .pause_val);
+                                            .set_bass, .bass_val, .set_pause, .pause_val,
+                                            .set_vol, .vol_val);
     logic t_resume;                             // audio side: toggles
     logic [2:0] resume_s1 = '0;
     always_ff @(posedge clk) resume_s1 <= {resume_s1[1:0], t_resume};

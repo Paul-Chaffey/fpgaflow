@@ -181,7 +181,7 @@ and swaps between samples.
 
 From status "M6" the USB stream is a sequence of records (`rtl/stream_demux.sv`):
 `[type, len_hi, len_lo, payload]` with 0 = MP3 bytes, 1 = EQ coefficients
-(200 bytes), 2 = bass level, 3 = pause, 4 = EQ off. The host sends the song in
+(200 bytes), 2 = bass level, 3 = pause, 4 = EQ off, 5 = volume. The host sends the song in
 2 KB records and slips settings in between, so a change takes effect within
 about 0.1-0.2 s. Paused by the host, the FPGA lets go of FULL (and the stream
 doesn't time out) so that the record that resumes can get in.
@@ -201,7 +201,8 @@ fpgaflow -C examples/rc10-mp3 sim --tb tb_eq      # EQ + analyser vs the model
 `fpgaflow-player` ("RC10 Player" in the menu, installed by
 `scripts/install-desktop.sh`) lists the audio files under ~/Music (anything
 that isn't MPEG-1 Layer III is converted by ffmpeg as it streams), plays them
-with play/pause/stop/next and a position slider, and has a bass-boost button,
+with play/pause/stop/next, a position slider and the board's volume, and has a
+bass-boost button,
 the 10 EQ sliders with presets and the live band levels as an LED meter (a
 left and a right column of green/amber/red segments per band).
 

@@ -15,6 +15,7 @@ pub const T_EQ: u8 = 1;
 pub const T_BASS: u8 = 2;
 pub const T_PAUSE: u8 = 3;
 pub const T_EQ_OFF: u8 = 4;
+pub const T_VOLUME: u8 = 5;
 /// MP3 bytes per record: small, so a setting waits behind at most this much
 /// of the song (about 0.1 s at 128 kbit/s).
 pub const CHUNK: usize = 2048;
@@ -356,6 +357,8 @@ pub enum Command {
     Pause(bool),
     Stop,
     /// Jump to this many seconds into the song.
+    /// Volume 0..15 (as the joystick's up/down).
+    Volume(u8),
     Seek(f64),
 }
 
@@ -385,6 +388,7 @@ pub fn stream_song(
     let send_cmd = |c: &Command| -> Result<(), Error> {
         match c {
             Command::Bass(v) => b.usb_send(&record(T_BASS, &[(*v).min(3)])),
+            Command::Volume(v) => b.usb_send(&record(T_VOLUME, &[(*v).min(15)])),
             Command::Eq(g) => b.usb_send(&eq_record(rate, g.as_ref())),
             Command::Pause(p) => b.usb_send(&record(T_PAUSE, &[*p as u8])),
             Command::Stop | Command::Seek(_) => Ok(()),

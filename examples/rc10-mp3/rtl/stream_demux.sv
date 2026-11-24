@@ -12,6 +12,7 @@
 //      FULL (so the record that resumes can get in) and the host must send
 //      nothing but settings records until it resumes
 //   4  EQ off (no payload)
+//   5  volume: 1 byte, 0..15 (as the joystick's up/down)
 // Any other type is skipped. A new stream (`new_stream`, the first byte after
 // an idle gap) always starts with a type byte. MP3 payload bytes keep the
 // front end's FULL handling; settings bytes are taken at once.
@@ -33,6 +34,8 @@ module stream_demux (
     output logic [1:0]  bass_val = '0,
     output logic        set_pause = 1'b0,
     output logic        pause_val = 1'b0,
+    output logic        set_vol = 1'b0,
+    output logic [3:0]  vol_val = '0,
     // records taken, for the status (wrapping)
     output logic [7:0]  eq_sets = '0,
     output logic [7:0]  settings = '0
@@ -52,6 +55,7 @@ module stream_demux (
         cw_en <= 1'b0;
         set_bass <= 1'b0;
         set_pause <= 1'b0;
+        set_vol <= 1'b0;
         if (rx_valid) begin
             if (first) begin
                 typ <= rx_data;
@@ -106,6 +110,11 @@ module stream_demux (
                             8'd3: begin
                                 set_pause <= 1'b1;
                                 pause_val <= rx_data[0];
+                                settings <= settings + 1'b1;
+                            end
+                            8'd5: begin
+                                set_vol <= 1'b1;
+                                vol_val <= rx_data[3:0];
                                 settings <= settings + 1'b1;
                             end
                             default: ;

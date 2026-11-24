@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use fpgaflow_celoxica::{check_bitstream, Board, Error};
 
-const USAGE: &str = "usage: fpgaflow-celoxica status | load FILE.bit | flash-list | flash-read OUT.tar | flash-write FILE.bit [INDEX] | usb-write FILE | usb-read N [OUT] | play AUDIOFILE | mp3-play FILE.mp3 [--monitor] | eq-play FILE [--eq G,..,G] [--eq-off] [--bass N] [--levels] | mp3-check FILE.mp3 [--monitor] | --version";
+const USAGE: &str = "usage: fpgaflow-celoxica status | load FILE.bit | flash-list | flash-read OUT.tar | flash-write FILE.bit [INDEX] | usb-write FILE | usb-read N [OUT] | play AUDIOFILE | mp3-play FILE.mp3 [--monitor] | eq-play FILE [--eq G,..,G] [--eq-off] [--bass N] [--volume N] [--levels] | mp3-check FILE.mp3 [--monitor] | --version";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -385,7 +385,7 @@ fn wait_idle(b: &Board) -> Result<(), Error> {
     b.mp3_wait_idle(Duration::from_secs(3)).map(|_| ())
 }
 
-/// `eq-play FILE [--eq G,..,G] [--eq-off] [--bass N] [--levels]`: play any
+/// `eq-play FILE [--eq G,..,G] [--eq-off] [--bass N] [--volume N] [--levels]`: play any
 /// audio file on an "M6" player with the 10 EQ gains (dB, 31 Hz..16 kHz) and
 /// bass level sent as records first; `--levels` shows the band levels as a
 /// text bar graph (tests stages 2-3 without the player app).
@@ -407,6 +407,9 @@ fn eq_play_rest(
             "--eq-off" => start.push(Command::Eq(None)),
             "--bass" => start.push(Command::Bass(
                 it.next().and_then(|v| v.parse().ok()).unwrap_or(0),
+            )),
+            "--volume" => start.push(Command::Volume(
+                it.next().and_then(|v| v.parse().ok()).unwrap_or(14),
             )),
             "--eq" => {
                 let g: Vec<f64> = it

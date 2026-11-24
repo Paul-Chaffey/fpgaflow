@@ -156,7 +156,9 @@ pub fn fix_edif_for_ise(path: &Path) -> std::io::Result<usize> {
 /// string, so reports still show the module prefix.
 fn shorten_long_identifiers(text: &mut String) -> usize {
     static LONG: std::sync::LazyLock<regex::Regex> =
-        std::sync::LazyLock::new(|| regex::Regex::new(r"[A-Za-z_][A-Za-z0-9_]{255,}").unwrap());
+        // (edif2ngd rejects a 255-character name too, though its message
+        // says "exceeds 255": anything from 240 is shortened, with margin.)
+        std::sync::LazyLock::new(|| regex::Regex::new(r"[A-Za-z_][A-Za-z0-9_]{239,}").unwrap());
     let mut names: Vec<String> = LONG
         .find_iter(text)
         .map(|m| m.as_str().to_string())
@@ -183,7 +185,32 @@ fn shorten_long_identifiers(text: &mut String) -> usize {
         }
         *text = text.replace(name.as_str(), &short);
     }
-    names.len()
+    names.len() + shorten_long_rename_strings(text)
+}
+
+/// Yosys writes `(rename ID "original")` for names EDIF can't spell (with
+/// brackets, dots...). edif2ngd holds those strings to the same 255-character
+/// limit (in practice under 255); cut any of 240 or more to 200 characters
+/// and a number, so each stays
+/// unique. Returns how many were cut.
+fn shorten_long_rename_strings(text: &mut String) -> usize {
+    static LONG: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r#"\(rename ([A-Za-z_][A-Za-z0-9_]*) "([^"]{240,})"\)"#).unwrap()
+    });
+    let mut n = 0usize;
+    let out = LONG.replace_all(text, |c: &regex::Captures| {
+        n += 1;
+        let s = &c[2];
+        let mut cut = 200.min(s.len());
+        while !s.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        format!("(rename {} \"{}_fpgaflow_{}\")", &c[1], &s[..cut], n - 1)
+    });
+    if n > 0 {
+        *text = out.into_owned();
+    }
+    n
 }
 
 /// The project's constraint files are concatenated into one UCF (ngdbuild
@@ -665,6 +692,20 @@ mod edif_tests {
             "arrays untouched"
         );
         assert_eq!(super::fix_edif_for_ise(&p).unwrap(), 0, "idempotent");
+    }
+
+    #[test]
+    fn long_rename_strings_are_cut_and_stay_unique() {
+        let long = format!("a[0]{}", "x".repeat(300));
+        let mut text = format!(
+            "(instance (rename id1 \"{long}_1\")\n(instance (rename id2 \"{long}_2\")\n(net (rename id3 \"short[1]\")"
+        );
+        assert_eq!(super::shorten_long_rename_strings(&mut text), 2);
+        let strings: Vec<&str> = text.split('"').skip(1).step_by(2).collect();
+        assert!(strings.iter().all(|s| s.len() <= 255), "{strings:?}");
+        assert_ne!(strings[0], strings[1]);
+        assert_eq!(strings[2], "short[1]");
+        assert!(text.contains("(rename id1 ") && text.contains("(rename id3 \"short[1]\")"));
     }
 
     #[test]

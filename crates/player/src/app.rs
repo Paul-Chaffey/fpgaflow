@@ -97,6 +97,8 @@ pub struct App {
     await_reset: Option<u32>,
     /// The position slider while it is being dragged.
     seek_drag: Option<f64>,
+    /// A volume just set here, until the board reports it (or 1.5 s pass).
+    vol_pending: Option<(u8, Instant)>,
     board: Option<Arc<Board>>,
     board_err: Option<String>,
     shared: Arc<Mutex<Shared>>,
@@ -136,6 +138,7 @@ impl App {
             start_offset: 0.0,
             await_reset: None,
             seek_drag: None,
+            vol_pending: None,
             board: None,
             board_err: None,
             shared: Arc::new(Mutex::new(Shared::default())),
@@ -256,6 +259,7 @@ impl App {
         let rate = self.status().map_or(0, |s| s.rate as usize);
         let rec = match &c {
             Command::Bass(v) => mp3::record(mp3::T_BASS, &[*v]),
+            Command::Volume(v) => mp3::record(mp3::T_VOLUME, &[*v]),
             Command::Eq(g) => mp3::eq_record(rate, g.as_ref()),
             _ => return,
         };
@@ -538,6 +542,41 @@ impl App {
                     }
                 }
             });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(8.0);
+                self.volume(ui, st.as_ref());
+            });
+        });
+    }
+
+    /// The board's volume (0..15, 3 dB steps), set from here or the joystick.
+    fn volume(&mut self, ui: &mut egui::Ui, st: Option<&Mp3Status>) {
+        let board = st.map(|s| s.volume);
+        if let (Some((v, t)), Some(b)) = (self.vol_pending, board) {
+            if v == b || t.elapsed() > Duration::from_millis(1500) {
+                self.vol_pending = None;
+            }
+        }
+        let mut v = self.vol_pending.map(|(v, _)| v).or(board).unwrap_or(0);
+        ui.vertical(|ui| {
+            ui.label(RichText::new("Volume").strong());
+            ui.spacing_mut().slider_width = 180.0;
+            let r = ui
+                .add_enabled(
+                    board.is_some(),
+                    egui::Slider::new(&mut v, 0..=15).custom_formatter(|n, _| {
+                        if n == 0.0 {
+                            "mute".into()
+                        } else {
+                            format!("{n:.0}")
+                        }
+                    }),
+                )
+                .on_hover_text("The board's volume, 3 dB a step (as the joystick's up/down)");
+            if r.changed() {
+                self.vol_pending = Some((v, Instant::now()));
+                self.send(Command::Volume(v));
+            }
         });
     }
 
