@@ -117,6 +117,8 @@ pub struct App {
     running: Option<Running>,
     message: Option<(bool, String)>,
     sim_tool: SimTool,
+    /// What Program writes: the FPGA's SRAM (default) or the board's flash.
+    program_flash: bool,
 
     last_sim: Option<(SimTool, Option<Verdict>)>,
     last_synth: Option<SynthView>,
@@ -176,6 +178,7 @@ impl App {
             running: None,
             message: None,
             sim_tool: SimTool::Icarus,
+            program_flash: false,
             last_sim: None,
             last_synth: None,
             last_build: None,
@@ -244,6 +247,7 @@ impl App {
         self.state.last_project = Some(p.root.clone());
         self.state.save();
         self.sim_tool = p.file.sim.tool;
+        self.program_flash = false; // a new project starts on SRAM
         self._fs_watch = match worker::watch_project(&p.root, self.repaint.clone(), self.tx.clone())
         {
             Ok(w) => Some(w),
@@ -442,7 +446,7 @@ impl App {
             let what = board.and_then(fpgaflow_flow::flash_name).unwrap_or("flash");
             let replaces = match board.and_then(|b| b.program.as_ref()).map(|p| p.method) {
                 Some(board::ProgramMethod::Celoxica) => {
-                    "This replaces flash file 1, which the RC10 boots from: Celoxica's demo menu, if it is still there."
+                    "This replaces flash file 1, the design the RC10 boots from (Celoxica's demo menu as shipped; a flash backup can put it back)."
                 }
                 _ => "This replaces whatever the Platform Flash holds now. The FPGA boots from it when the configuration mode jumpers select Master Serial.",
             };
@@ -984,17 +988,53 @@ impl App {
                     }
                 }
             };
+            // SRAM or flash, like the simulator choice; flash only where
+            // fpgaflow can write the board's flash.
+            let flash = self.project_board().and_then(fpgaflow_flow::flash_name);
+            if flash.is_none() {
+                self.program_flash = false;
+            }
+            egui::ComboBox::from_id_salt("program_target")
+                .width(70.0)
+                .selected_text(if self.program_flash { "Flash" } else { "SRAM" })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.program_flash, false, "SRAM")
+                        .on_hover_text("Load the FPGA directly: runs at once, lost at reset or power-off");
+                    ui.add_enabled_ui(flash.is_some(), |ui| {
+                        ui.selectable_value(&mut self.program_flash, true, "Flash")
+                            .on_hover_text("Write the board's flash: the FPGA boots this design from now on")
+                            .on_disabled_hover_text("fpgaflow can't write this board's flash (or the project has no board)");
+                    });
+                })
+                .response
+                .on_hover_text(match flash {
+                    Some(f) => format!("Program target: the FPGA's SRAM, or the {f}"),
+                    None => "Program target: the FPGA's SRAM".to_string(),
+                });
             let prog_status = self.status.get(&Slot::Program).copied();
             let (mark, color) = status_mark(prog_status.unwrap_or(Status::Idle));
+            let mut want_flash = false;
             if ui
                 .add_enabled(
                     can && connected,
                     egui::Button::new(RichText::new(format!("{mark} Program")).color(color)),
                 )
+                .on_hover_text(if self.program_flash {
+                    "Write the bitstream to the board's flash (asks first)"
+                } else {
+                    "Load the bitstream into the FPGA (SRAM; the flash is not touched)"
+                })
                 .on_disabled_hover_text(if connected { "Busy, or no project open".to_string() } else { why_not.clone() })
                 .clicked()
             {
-                clicked = Some(Action::Program);
+                if self.program_flash {
+                    want_flash = true; // the "Program flash" window confirms, then starts it
+                } else {
+                    clicked = Some(Action::Program);
+                }
+            }
+            if want_flash {
+                self.confirm_flash = true;
             }
             if ui
                 .add_enabled(can && connected, egui::Button::new("Detect"))
