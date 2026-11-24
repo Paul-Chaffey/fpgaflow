@@ -2,9 +2,10 @@
 
 // The two 7-segment digits ({dp, g, f, e, d, c, b, a}, active high; seg0 is
 // the left digit). After an up/down press (vol_key) the volume shows for
-// VOL_MS ms (a press restarts it); otherwise "M" (across both digits: the
-// left draws a, b, c, e, f, the right a, b, c, so three uprights under one
-// bar) and "P3" take turns, ROT_MS ms each, starting with M. The right
+// VOL_MS ms (a press restarts it); otherwise "M" (across both digits: two
+// upside-down U's without their inner lower uprights, so the left digit
+// draws a, b, e, f and the right a, b, c, f) and "P3" take turns, ROT_MS ms
+// each, starting with M. The right
 // digit's dot is lit while paused.
 module display #(
     parameter int MS     = 48000,   // clocks per millisecond
@@ -18,7 +19,7 @@ module display #(
     output logic [7:0] seg0,
     output logic [7:0] seg1
 );
-    localparam logic [7:0] M_L = 8'h37, M_R = 8'h07, P = 8'h73, THREE = 8'h4F;
+    localparam logic [7:0] M_L = 8'h33, M_R = 8'h27, P = 8'h73, THREE = 8'h4F;
 
     function automatic logic [7:0] digit(input logic [3:0] v);
         case (v)
