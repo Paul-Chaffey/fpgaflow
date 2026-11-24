@@ -1,0 +1,20 @@
+[package]
+name = "fpgaflow-player"
+description = "Music player for the Celoxica RC10's hardware MP3 decoder: song list, bass boost, graphic EQ"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "fpgaflow-player"
+path = "src/main.rs"
+
+[dependencies]
+eframe = "0.37"
+rfd = "0.18"
+serde.workspace = true
+serde_json.workspace = true
+fpgaflow-celoxica = { path = "../celoxica" }

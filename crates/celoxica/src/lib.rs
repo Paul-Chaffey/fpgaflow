@@ -45,6 +45,8 @@
 //! nWR high = the FX2 reads D\[7:0\]. The FPGA paces it with FX2_FULL (R14:
 //! stop sending) and FX2_EMPTY (P14: nothing to read).
 
+pub mod mp3;
+
 use std::time::{Duration, Instant};
 
 use rusb::{DeviceHandle, GlobalContext};

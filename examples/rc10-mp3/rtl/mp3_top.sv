@@ -17,8 +17,8 @@
 // the synthesis waits for room, which stalls the stages before it and, at
 // last, the USB bus (FULL), so the host streams at playback speed.
 //
-// Status (USB read, 64 bytes):
-//   0-1   "M5"
+// Status (USB read, 128 bytes):
+//   0-1   "M6" (the stream is in records: rtl/stream_demux.sv)
 //   2-5   bytes received in this stream
 //   6-9   frames found
 //   10-13 bytes inside those frames
@@ -40,6 +40,10 @@
 //   61    {paused, rz, bass[1:0], volume[3:0]}
 //   62    rate the DACs play at: 0 = 44.1, 1 = 48, 2 = 32 kHz
 //   63    C3
+//   64    EQ coefficient sets taken (wrapping)
+//   65    other settings records taken (bass, pause, EQ off; wrapping)
+//   66    {5'b0, paused by the host, EQ on, EQ bank in use}
+//   67-127 0
 // Joystick (as the PCM player): up/down = volume in 3 dB steps, left/right =
 // DAC coding (NRZ/RZ), right = bass boost (rtl/eq.sv: off, +4, +8, +12 dB
 // with automatic headroom), centre = pause. Display: "M" (across both digits) and
@@ -73,10 +77,11 @@ module mp3_top #(
 
     logic         rx_valid, idle;
     logic [7:0]   rx_data;
-    logic [511:0] status;
-    fx2_bus #(.IDLE_BITS(IDLE_BITS), .SB(6)) u_bus (
+    logic [1023:0] status;
+    logic          usb_hold;          // paused by the host (below)
+    fx2_bus #(.IDLE_BITS(IDLE_BITS), .SB(7)) u_bus (
         .clk, .fx2_ncs, .fx2_nwr, .fx2_seln, .fx2_d,
-        .rx_valid, .rx_data, .idle, .hold(full), .status
+        .rx_valid, .rx_data, .idle, .hold(full | usb_hold), .status
     );
     assign fx2_empty = 1'b0;
     wire new_stream = rx_valid & idle;
@@ -86,8 +91,20 @@ module mp3_top #(
     logic [31:0] frames, frame_bytes, crc, last_header;
     logic [15:0] undecodable;
     logic [12:0] fill;
+    // The stream's records: MP3 bytes to the front end, settings to the
+    // controls and the EQ (rtl/stream_demux.sv).
+    logic        mp3_valid, cw_en, eq_on, eq_bank, set_bass, set_pause, pause_val;
+    logic [7:0]  mp3_data, eq_sets, settings;
+    logic [6:0]  cw_addr;
+    logic [24:0] cw_data;
+    logic [1:0]  bass_val;
+    stream_demux u_dmx (
+        .clk, .new_stream, .rx_valid, .rx_data, .mp3_valid, .mp3_data,
+        .cw_en, .cw_addr, .cw_data, .eq_on, .eq_bank,
+        .set_bass, .bass_val, .set_pause, .pause_val, .eq_sets, .settings
+    );
     mp3_frontend u_fe (
-        .clk, .in_valid(rx_valid), .in_data(rx_data), .new_stream, .idle, .full,
+        .clk, .in_valid(mp3_valid), .in_data(mp3_data), .new_stream, .idle, .full,
         .rec_valid, .rec_data, .frames, .frame_bytes, .undecodable, .crc,
         .last_header, .fill, .res_raddr, .res_rdata,
         .side, .fd_valid, .fd_ready
@@ -144,7 +161,8 @@ module mp3_top #(
     logic       paused, rz;
     logic       vol_key, bass_key;
     logic [1:0] bass;
-    controls #(.MS(MS), .VOL0(VOL0)) u_ctl (.clk, .joy, .vol, .paused, .rz, .vol_key, .bass, .bass_key);
+    controls #(.MS(MS), .VOL0(VOL0)) u_ctl (.clk, .joy, .vol, .paused, .rz, .vol_key, .bass, .bass_key,
+                                            .set_bass, .bass_val, .set_pause, .pause_val);
     logic t_resume;                             // audio side: toggles
     logic [2:0] resume_s1 = '0;
     always_ff @(posedge clk) resume_s1 <= {resume_s1[1:0], t_resume};
@@ -159,7 +177,11 @@ module mp3_top #(
             started <= 1'b1;
         end
     wire [7:0] pfill = pcount[AW] ? 8'hFF : 8'(pcount[AW-1:0] >> (AW - 8));
-    assign fx2_full = full;
+    // Paused by the host (a pause record), FULL is let go so the record that
+    // resumes can get in: the host sends nothing else meanwhile. The stream
+    // doesn't time out either. (Paused by the joystick, FULL holds as usual.)
+    assign usb_hold = pause_val & paused;
+    assign fx2_full = full & ~usb_hold;
 
     logic [31:0] rx_bytes = '0;
     always_ff @(posedge clk)
@@ -171,10 +193,11 @@ module mp3_top #(
     // 32-bit value placed as it is comes out little-endian; the header is
     // reversed so its bytes come out in stream order.
     assign status = {
+        488'd0, {5'd0, usb_hold, eq_on, eq_bank}, settings, eq_sets,
         8'hC3, {6'd0, arate_s2}, {paused, rz, bass, vol}, pfill, underruns, pcrc, nsamp,
         bcrc, subs, scrc, spectra, gcrc, granules, {idle, full, 6'd0}, fill8, undecodable,
         last_header[7:0], last_header[15:8], last_header[23:16], last_header[31:24],
-        crc, frame_bytes, frames, rx_bytes, 8'h35, 8'h4D
+        crc, frame_bytes, frames, rx_bytes, 8'h36, 8'h4D
     };
 
     // ---- Display and LEDs
@@ -189,10 +212,13 @@ module mp3_top #(
     // ============================== audio side ==============================
     logic [3:0] vol_s1 = '0, vol_a = '0;
     logic [1:0] bass_s1 = '0, bass_a = '0;
+    logic       eqon_s1 = 1'b0, eqon_a = 1'b0, bank_s1 = 1'b0, bank_a = 1'b0;
     logic       rz_s1 = 1'b1, rz_a = 1'b1, paused_s1 = 1'b0, paused_a = 1'b0;
     always_ff @(posedge aclk) begin
         vol_s1 <= vol;       vol_a <= vol_s1;
         bass_s1 <= bass;     bass_a <= bass_s1;
+        eqon_s1 <= eq_on;    eqon_a <= eqon_s1;
+        bank_s1 <= eq_bank;  bank_a <= bank_s1;
         rz_s1 <= rz;         rz_a <= rz_s1;
         paused_s1 <= paused; paused_a <= paused_s1;
     end
@@ -237,8 +263,9 @@ module mp3_top #(
     logic re_d = 1'b0;
     always_ff @(posedge aclk) re_d <= re;
     logic signed [15:0] eq_l, eq_r;
-    eq u_eq (.clk(aclk), .start(re_d), .rate(arate), .level(bass_a),
-             .in_l(smp_l), .in_r(smp_r), .out_l(eq_l), .out_r(eq_r), .done());
+    eq u_eq (.clk(aclk), .start(re_d), .rate(arate), .level(bass_a), .on(eqon_a), .bank(bank_a),
+             .in_l(smp_l), .in_r(smp_r), .out_l(eq_l), .out_r(eq_r), .done(),
+             .wclk(clk), .cw_en, .cw_addr, .cw_data);
     // Volume (3 dB steps, top step 0.9 of full scale) and the DACs.
     logic [7:0] gain;
     always_comb

@@ -25,7 +25,17 @@ module tb_decoder;
     logic [7:0] g_data;
     logic [31:0] granules, gcrc;
 
-    mp3_frontend dut (.clk, .in_valid, .in_data, .new_stream, .idle, .full,
+    // The stream as the host sends it: records, through the demux (stage 2
+    // of the EQ plan). Settings records go to the demux's outputs only.
+    logic mp3_valid, cw_en, eq_on, eq_bank, set_bass, set_pause, pause_val;
+    logic [7:0] mp3_data, eq_sets, settings;
+    logic [6:0] cw_addr;
+    logic [24:0] cw_data;
+    logic [1:0] bass_val;
+    stream_demux dmx (.clk, .new_stream, .rx_valid(in_valid), .rx_data(in_data), .mp3_valid, .mp3_data,
+                      .cw_en, .cw_addr, .cw_data, .eq_on, .eq_bank, .set_bass, .bass_val,
+                      .set_pause, .pause_val, .eq_sets, .settings);
+    mp3_frontend dut (.clk, .in_valid(mp3_valid), .in_data(mp3_data), .new_stream, .idle, .full,
                       .rec_valid, .rec_data, .frames, .frame_bytes, .undecodable,
                       .crc, .last_header, .fill, .res_raddr, .res_rdata,
                       .side, .fd_valid, .fd_ready);
@@ -208,6 +218,8 @@ module tb_decoder;
     integer total_spec = 0, total_sub = 0, total_pcm = 0;
     reg [8*64-1:0] name;
     reg [31:0] want_crc, want_gcrc, want_scrc, want_bcrc, want_pcrc;
+    logic [7:0] mp3q[$], fq[$];
+    integer pos, len, kind, qi, want_sets, want_settings, sets0, settings0;
     string path;
     initial begin
         lfd = $fopen({DIR, "list.txt"}, "r");
@@ -231,9 +243,44 @@ module tb_decoder;
                           want_spec, want_scrc, want_sub, want_bcrc, want_pcm, want_pcrc));
             $fclose(c);
             nrec = 0; nbyte = 0; sent = 0;
+            sets0 = eq_sets; settings0 = settings;
             idle = 0;
+            // Frame it: MP3 records of random length, with settings records
+            // (EQ sets, bass, pause, EQ off) slipped in between at random.
+            mp3q.delete();
             c = $fgetc(fd);
-            while (c != -1) begin
+            while (c != -1) begin mp3q.push_back(c[7:0]); c = $fgetc(fd); end
+            fq.delete();
+            want_sets = 0; want_settings = 0;
+            pos = 0;
+            while (pos < mp3q.size()) begin
+                if ($urandom % 6 == 0) begin
+                    kind = $urandom % 4;
+                    if (kind == 0) begin                       // EQ set: 200 bytes
+                        fq.push_back(8'd1); fq.push_back(8'd0); fq.push_back(8'd200);
+                        repeat (200) fq.push_back(8'($urandom));
+                        want_sets = want_sets + 1;
+                    end else if (kind == 1) begin              // bass
+                        fq.push_back(8'd2); fq.push_back(8'd0); fq.push_back(8'd1);
+                        fq.push_back(8'($urandom % 4));
+                        want_settings = want_settings + 1;
+                    end else if (kind == 2) begin              // pause / play
+                        fq.push_back(8'd3); fq.push_back(8'd0); fq.push_back(8'd1);
+                        fq.push_back(8'($urandom % 2));
+                        want_settings = want_settings + 1;
+                    end else begin                             // EQ off
+                        fq.push_back(8'd4); fq.push_back(8'd0); fq.push_back(8'd0);
+                        want_settings = want_settings + 1;
+                    end
+                end
+                len = 1 + $urandom % 3000;
+                if (len > mp3q.size() - pos) len = mp3q.size() - pos;
+                fq.push_back(8'd0); fq.push_back(8'(len >> 8)); fq.push_back(8'(len));
+                for (int k = 0; k < len; k++) fq.push_back(mp3q[pos + k]);
+                pos = pos + len;
+            end
+            qi = 0;
+            while (qi < fq.size()) begin
                 @(posedge clk);
                 #1;
                 in_valid = 0;
@@ -241,10 +288,10 @@ module tb_decoder;
                 // Random gaps, and none while the FX2 would have seen FULL.
                 if (!full_hist[2] && ($urandom % 8 != 0)) begin
                     in_valid = 1;
-                    in_data = c[7:0];
+                    in_data = fq[qi];
                     new_stream = sent == 0;
                     sent = sent + 1;
-                    c = $fgetc(fd);
+                    qi = qi + 1;
                 end
             end
             @(posedge clk); #1 in_valid = 0; new_stream = 0;
@@ -258,7 +305,10 @@ module tb_decoder;
             repeat (20000) @(posedge clk);
             if (frames !== want_frames || crc !== want_crc || nrec != want_frames
                 || granules !== want_grans || gcrc !== want_gcrc || spectra !== want_spec || scrc !== want_scrc
-                || subs !== want_sub || bcrc !== want_bcrc || nsamp !== want_pcm || pcrc !== want_pcrc) begin
+                || subs !== want_sub || bcrc !== want_bcrc || nsamp !== want_pcm || pcrc !== want_pcrc
+                || eq_sets !== 8'(sets0 + want_sets) || settings !== 8'(settings0 + want_settings)) begin
+                $display("FAIL:   demux took %0d EQ sets (sent %0d), %0d settings (sent %0d)",
+                         8'(eq_sets - sets0), want_sets, 8'(settings - settings0), want_settings);
                 $display("FAIL: %0s: %0d frames (model %0d), CRC %h (model %h); %0d granules (model %0d), CRC %h (model %h); %0d spectra (model %0d), CRC %h (model %h)",
                          path, frames, want_frames, crc, want_crc, granules, want_grans, gcrc, want_gcrc,
                          spectra, want_spec, scrc, want_scrc);

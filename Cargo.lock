@@ -1573,6 +1573,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fpgaflow-player"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "fpgaflow-celoxica",
+ "rfd",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "fpgaflow-pnr"
 version = "0.1.0"
 dependencies = [

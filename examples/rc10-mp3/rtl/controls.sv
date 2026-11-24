@@ -15,7 +15,12 @@ module controls #(
     output logic       rz,             // DAC coding: 1 = return to zero
     output logic       vol_key,        // a pulse per up or down press (even at a limit)
     output logic [1:0] bass,           // bass boost level (0 = off)
-    output logic       bass_key        // a pulse per right press
+    output logic       bass_key,       // a pulse per right press
+    // the same settings from the host (stream_demux); the last one wins
+    input  logic       set_bass,
+    input  logic [1:0] bass_val,
+    input  logic       set_pause,
+    input  logic       pause_val
 );
     logic [$clog2(MS)-1:0] div = '0;
     logic [4:0] s1 = '0, s2 = '0, held = '0;
@@ -40,6 +45,8 @@ module controls #(
             if (press[0]) b <= b + 2'd1;
             if (press[4]) p <= ~p;
         end
+        if (set_bass) b <= bass_val;
+        if (set_pause) p <= pause_val;
         vol_key <= div == '0 && (press[2] || press[3]);
         bass_key <= div == '0 && press[0];
     end

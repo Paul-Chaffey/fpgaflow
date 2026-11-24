@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use fpgaflow_celoxica::{check_bitstream, Board, Error};
 
-const USAGE: &str = "usage: fpgaflow-celoxica status | load FILE.bit | flash-list | flash-read OUT.tar | flash-write FILE.bit [INDEX] | usb-write FILE | usb-read N [OUT] | play AUDIOFILE | mp3-play FILE.mp3 [--monitor] | mp3-check FILE.mp3 [--monitor] | --version";
+const USAGE: &str = "usage: fpgaflow-celoxica status | load FILE.bit | flash-list | flash-read OUT.tar | flash-write FILE.bit [INDEX] | usb-write FILE | usb-read N [OUT] | play AUDIOFILE | mp3-play FILE.mp3 [--monitor] | eq-play FILE [--eq G,..,G] [--eq-off] [--bass N] | mp3-check FILE.mp3 [--monitor] | --version";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -32,6 +32,7 @@ fn main() -> ExitCode {
         ["mp3-check", file, "--monitor"] => mp3_check(file, true),
         ["mp3-play", file] => mp3_play(file, false),
         ["mp3-play", file, "--monitor"] => mp3_play(file, true),
+        ["eq-play", file, ref opts @ ..] => eq_play(file, opts),
         ["usb-read", n] | ["usb-read", n, _] => match n.parse() {
             Ok(n) => usb_read(n, args.get(2).map(String::as_str)),
             Err(_) => {
@@ -213,7 +214,7 @@ fn play(file: &str) -> Result<(), Error> {
     use std::io::Read;
     let b = open()?;
     // The MP3 decoder (examples/rc10-mp3) takes MP3s as they are.
-    if b.usb_read(2, Duration::from_secs(2))? == b"M5" {
+    if matches!(&b.usb_read(2, Duration::from_secs(2))?[..], b"M5" | b"M6") {
         drop(b);
         return play_on_decoder(file);
     }
@@ -346,7 +347,7 @@ fn front_end_status(b: &Board) -> Result<FrontEndStatus, Error> {
 
 fn mp3_status(b: &Board) -> Result<(FrontEndStatus, Mp3PlayerStatus), Error> {
     let s = b.usb_read(64, Duration::from_secs(2))?;
-    if &s[0..2] != b"M5" {
+    if s[0] != b'M' || !(b'5'..=b'6').contains(&s[1]) {
         return Err(Error::Other(
             "the RC10 isn't running the MP3 front end: load \
              examples/rc10-mp3/build/impl/mp3_top.bit first"
@@ -381,16 +382,64 @@ fn mp3_status(b: &Board) -> Result<(FrontEndStatus, Mp3PlayerStatus), Error> {
 /// Wait (up to 3 s) for the decoder to finish a previous stream: a new one
 /// needs the front end idle (22 ms without bytes).
 fn wait_idle(b: &Board) -> Result<(), Error> {
-    let start = Instant::now();
-    while !front_end_status(b)?.idle {
-        if start.elapsed() > Duration::from_secs(3) {
-            return Err(Error::Other(
-                "the decoder is still busy with another stream".into(),
-            ));
+    b.mp3_wait_idle(Duration::from_secs(3)).map(|_| ())
+}
+
+/// `eq-play FILE [--eq G,..,G] [--bass N]`: play any audio file on an "M6"
+/// player with the 10 EQ gains (dB, 31 Hz..16 kHz) and bass level sent as
+/// records first (tests stage 2 without the player app).
+fn eq_play(file: &str, opts: &[&str]) -> Result<(), Error> {
+    use fpgaflow_celoxica::mp3::{stream_song, Command, Source};
+    let mut start = Vec::new();
+    let mut it = opts.iter();
+    while let Some(o) = it.next() {
+        match (*o, it.next()) {
+            ("--eq", Some(v)) => {
+                let g: Vec<f64> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+                if g.len() != 10 {
+                    return Err(Error::Other(
+                        "--eq takes 10 gains in dB, comma-separated".into(),
+                    ));
+                }
+                start.push(Command::Eq(Some(std::array::from_fn(|i| g[i]))));
+            }
+            ("--eq-off", _) => start.push(Command::Eq(None)),
+            ("--bass", Some(v)) => start.push(Command::Bass(v.parse().unwrap_or(0))),
+            _ => return Err(Error::Other(format!("unknown option {o}"))),
         }
-        std::thread::sleep(Duration::from_millis(10));
     }
-    Ok(())
+    let b = open()?;
+    let s = b.mp3_wait_idle(Duration::from_secs(3))?;
+    if !s.framed() {
+        return Err(Error::Other(
+            "the running player is older than \"M6\": no EQ".into(),
+        ));
+    }
+    let mut src = Source::open(std::path::Path::new(file))?;
+    println!(
+        "playing {file}{}",
+        if src.converted {
+            " (converted by ffmpeg)"
+        } else {
+            ""
+        }
+    );
+    let (_tx, rx) = std::sync::mpsc::channel();
+    let t = Instant::now();
+    stream_song(&b, &mut src, &start, &rx)?;
+    let s = b.mp3_status()?;
+    println!(
+        "sent in {:.1} s; {} frames, {} samples, {} underruns; bass b{}, EQ {} ({} sets, {} settings taken)",
+        t.elapsed().as_secs_f64(),
+        s.frames,
+        s.samples,
+        s.underruns,
+        s.bass,
+        if s.eq_on { "on" } else { "off" },
+        s.eq_sets,
+        s.settings
+    );
+    b.normal_mode()
 }
 
 /// `play` with the MP3 decoder loaded: an MPEG-1 Layer III file goes as it
@@ -446,12 +495,21 @@ fn mp3_play(file: &str, monitor: bool) -> Result<(), Error> {
 
 /// Stream MP3 bytes to the decoder. The FPGA paces the stream: this returns
 /// when the last sample is in the DAC FIFO.
+/// The MP3 as the running player wants it: in records ("M6"), else raw.
+fn as_sent(b: &Board, mp3: &[u8]) -> Result<Vec<u8>, Error> {
+    Ok(if b.mp3_status()?.framed() {
+        fpgaflow_celoxica::mp3::frame_mp3(mp3)
+    } else {
+        mp3.to_vec()
+    })
+}
+
 fn mp3_play_bytes(file: &str, sent: &[u8], monitor: bool) -> Result<(), Error> {
     let b = open()?;
     wait_idle(&b)?;
     println!("playing {file} ({} bytes)", sent.len());
     let t = Instant::now();
-    send(&b, sent, monitor)?;
+    send(&b, &as_sent(&b, sent)?, monitor)?;
     // The decoder drains its buffers (well under a second).
     let mut last = mp3_status(&b)?.0.samples;
     loop {
@@ -573,8 +631,9 @@ fn mp3_check(file: &str, monitor: bool) -> Result<(), Error> {
     let (pcm16, pcrc) = pcm(sent);
     let b = open()?;
     wait_idle(&b)?;
+    let stream = as_sent(&b, sent)?;
     let t = Instant::now();
-    send(&b, sent, monitor)?;
+    send(&b, &stream, monitor)?;
     let secs = t.elapsed().as_secs_f64();
     // The last frame is accepted when the stream goes idle.
     let start = Instant::now();
@@ -594,7 +653,7 @@ fn mp3_check(file: &str, monitor: bool) -> Result<(), Error> {
     };
     b.normal_mode()?;
     let expect = FrontEndStatus {
-        rx_bytes: sent.len() as u32,
+        rx_bytes: stream.len() as u32,
         frames: want.frames,
         frame_bytes: sent.len() as u32 - want.skipped,
         crc: want.crc,

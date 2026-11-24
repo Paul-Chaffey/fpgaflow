@@ -67,3 +67,8 @@ TIMESPEC "TS_dac" = FROM "TN_dac" TO "TN_dac" 20.833 ns;
 # safe); it changes once per stream rate, with reads held off.
 INST "use48_q*" TNM = "TN_sel";
 TIMESPEC "TS_sel" = FROM "TN_sel" TIG;
+# EQ coefficient banks: written on the 48 MHz side, read on the DAC clock.
+# The host writes the bank not in use and the swap is synchronised, so the
+# write-to-read paths across the clocks are not timed.
+INST "u_eq.cram*" TNM = "TN_cram";
+TIMESPEC "TS_cram" = FROM "TN_cram" TIG;

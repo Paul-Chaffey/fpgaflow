@@ -13,7 +13,9 @@ files=(
   "$bin/fpgaflow-gui"
   "$bin/fpgaflow"
   "$bin/fpgaflow-celoxica"
+  "$bin/fpgaflow-player"
   "$data/applications/fpgaflow.desktop"
+  "$data/applications/fpgaflow-player.desktop"
   "$data/desktop-directories/fpgaflow-engineering.directory"
   "$conf/menus/applications-merged/fpgaflow-engineering.menu"
 )
@@ -30,19 +32,22 @@ if [[ "${1:-}" == "--uninstall" ]]; then
   exit 0
 fi
 
-"$cargo" build --release --manifest-path "$repo/Cargo.toml" -p fpgaflow-gui -p fpgaflow-cli -p fpgaflow-celoxica
+"$cargo" build --release --manifest-path "$repo/Cargo.toml" -p fpgaflow-gui -p fpgaflow-cli -p fpgaflow-celoxica -p fpgaflow-player
 install -Dm755 "$repo/target/release/fpgaflow-gui" "$bin/fpgaflow-gui"
 install -Dm755 "$repo/target/release/fpgaflow" "$bin/fpgaflow"
 install -Dm755 "$repo/target/release/fpgaflow-celoxica" "$bin/fpgaflow-celoxica"
+install -Dm755 "$repo/target/release/fpgaflow-player" "$bin/fpgaflow-player"
 
 for d in "$repo"/data/icons/hicolor/*/; do
   install -Dm644 "$d/apps/fpgaflow.png" "$data/icons/hicolor/$(basename "$d")/apps/fpgaflow.png"
 done
 sed "s|@BIN@|$bin/fpgaflow-gui|" "$repo/data/desktop/fpgaflow.desktop" \
   | install -Dm644 /dev/stdin "$data/applications/fpgaflow.desktop"
+sed "s|@BIN@|$bin/fpgaflow-player|" "$repo/data/desktop/fpgaflow-player.desktop" \
+  | install -Dm644 /dev/stdin "$data/applications/fpgaflow-player.desktop"
 install -Dm644 "$repo/data/desktop/fpgaflow-engineering.directory" \
   "$data/desktop-directories/fpgaflow-engineering.directory"
 install -Dm644 "$repo/data/desktop/fpgaflow-engineering.menu" \
   "$conf/menus/applications-merged/fpgaflow-engineering.menu"
 refresh
-echo "installed: menu Engineering → FPGA Flow ($bin/fpgaflow-gui)"
+echo "installed: menu Engineering → FPGA Flow ($bin/fpgaflow-gui), RC10 Player ($bin/fpgaflow-player)"
