@@ -123,7 +123,10 @@ module mp3_spectral (
     mp3_sfb_long  u_lb (.rate, .idx(band + 5'd1), .edge_(lend));
     mp3_sfb_short u_sl (.rate, .idx(band[3:0]), .edge_(s_lo));
     mp3_sfb_short u_sh (.rate, .idx(band[3:0] + 4'd1), .edge_(s_hi));
-    wire  [7:0] width = s_hi - s_lo;
+    // The short band's width, registered: the position steps at most once
+    // every few cycles (T_RQW, T_ST7), long after `band` settles.
+    logic [7:0] width = '0;
+    always_ff @(posedge clk) width <= s_hi - s_lo;
     logic [1:0] pretab;
     mp3_pretab u_pre (.band, .pre(pretab));
 
