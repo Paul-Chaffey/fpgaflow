@@ -1,13 +1,14 @@
 `timescale 1ns/1ps
 
 // RC10 MP3 decoder on the board, so far: the front end (milestone 1),
-// scale factors + Huffman decoding (milestone 2) and requantise, stereo,
-// reorder, antialias (milestone 3).
+// scale factors + Huffman decoding (milestone 2), requantise, stereo,
+// reorder, antialias (milestone 3) and IMDCT, overlap-add, frequency
+// inversion (milestone 4).
 // `fpgaflow-celoxica mp3-check FILE` streams an MP3 over USB and compares
 // what the decoder found with crates/mp3model.
 //
 // Status (USB read, 64 bytes):
-//   0-1   "M3"
+//   0-1   "M4"
 //   2-5   bytes received in this stream
 //   6-9   frames found
 //   10-13 bytes inside those frames
@@ -20,6 +21,8 @@
 //   30-33 CRC-32 of the granule records (scale factors + 576 values)
 //   34-37 spectra (IMDCT inputs: 576 values per granule and channel)
 //   38-41 CRC-32 of the spectra (each value as 32-bit LE)
+//   42-45 subband sets (IMDCT outputs: 576 values per granule and channel)
+//   46-49 CRC-32 of the subband values (32-bit LE)
 //   63    C3
 // Display: frames found (low byte, hex). LEDs 4-7: buffer fill; LED 0: idle.
 module mp3_top #(
@@ -68,10 +71,20 @@ module mp3_top #(
         .rec_valid(g_valid), .rec_data(g_data), .rec_ready(s_ready),
         .rec_hdr, .rec_ent, .rec_ch, .granules, .crc(gcrc)
     );
+    logic         i_ready, b_valid, spec_ch;
+    logic [7:0]   b_data;
+    logic [73:0]  spec_ent;
+    logic [31:0]  subs, bcrc;
     mp3_spectral u_sp (
         .clk, .new_stream, .in_valid(g_valid), .in_data(g_data), .in_hdr(rec_hdr),
         .in_ent(rec_ent), .in_ch(rec_ch), .ready(s_ready),
-        .spec_valid(s_valid), .spec_data(s_data), .spectra, .crc(scrc)
+        .spec_valid(s_valid), .spec_data(s_data), .spec_ready(i_ready),
+        .spec_ent, .spec_ch, .spectra, .crc(scrc)
+    );
+    mp3_imdct u_im (
+        .clk, .new_stream, .in_valid(s_valid), .in_data(s_data), .in_ent(spec_ent),
+        .in_ch(spec_ch), .ready(i_ready), .sub_valid(b_valid), .sub_data(b_data),
+        .subbands(subs), .crc(bcrc)
     );
     assign fx2_full = full;
 
@@ -85,9 +98,9 @@ module mp3_top #(
     // 32-bit value placed as it is comes out little-endian; the header is
     // reversed so its bytes come out in stream order.
     assign status = {
-        8'hC3, 168'd0, scrc, spectra, gcrc, granules, {idle, full, 6'd0}, fill8, undecodable,
+        8'hC3, 104'd0, bcrc, subs, scrc, spectra, gcrc, granules, {idle, full, 6'd0}, fill8, undecodable,
         last_header[7:0], last_header[15:8], last_header[23:16], last_header[31:24],
-        crc, frame_bytes, frames, rx_bytes, 8'h33, 8'h4D
+        crc, frame_bytes, frames, rx_bytes, 8'h34, 8'h4D
     };
 
     function automatic logic [7:0] hex7(input logic [3:0] v);

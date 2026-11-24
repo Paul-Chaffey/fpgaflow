@@ -133,6 +133,15 @@ pub fn coef_tables(f: &Fmt) -> ([i64; 8], [i64; 8], i64, [(i64, i64); 7]) {
     (k.aa_cs, k.aa_ca, k.ms, k.is_k)
 }
 
+/// IMDCT coefficients (cosine x window) in format `f`, as the back end uses
+/// them: long blocks [block type][i][k] (types 0, 1, 3) and the short block's
+/// [i][k].
+#[allow(clippy::type_complexity)]
+pub fn imdct_coefs(f: &Fmt) -> ([[[i64; 18]; 36]; 4], [[i64; 6]; 12]) {
+    let k = Coefs::new(f);
+    (k.imdct_long, k.imdct_short)
+}
+
 /// |n|^(4/3) as (mantissa with `m` bits, value in [2^(m-1), 2^m), exponent):
 /// value = mant * 2^(exp - (m - 1)).
 pub fn pow43(n: u32, m: u32) -> (i64, i32) {
@@ -185,6 +194,9 @@ pub struct FixedBackend {
     /// When set, the IMDCT's input (after requantise, stereo, reorder and
     /// antialias) of each granule and channel, in decoding order.
     pub hybrid: Option<Vec<[i64; 576]>>,
+    /// When set, the IMDCT's output (overlap-added, frequency-inverted;
+    /// `[18 * sb + t]`) of each granule and channel, in decoding order.
+    pub subband: Option<Vec<[i64; 576]>>,
 }
 
 impl FixedBackend {
@@ -197,6 +209,7 @@ impl FixedBackend {
             clipped: 0,
             stage_err: [0.0; 5],
             hybrid: None,
+            subband: None,
         }
     }
 
@@ -314,6 +327,9 @@ impl FixedBackend {
                     h.push(x);
                 }
                 let sub = self.imdct(&g, &x, ch);
+                if let Some(s) = &mut self.subband {
+                    s.push(sub);
+                }
                 self.note(3, &sub, &gr[ch].subband);
                 for t in 0..18 {
                     let s: [i64; 32] = std::array::from_fn(|sb| sub[18 * sb + t]);

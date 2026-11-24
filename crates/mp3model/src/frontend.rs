@@ -244,3 +244,24 @@ pub fn spectra(data: &[u8]) -> (Vec<[i64; 576]>, u32) {
     }
     (out, crc.value())
 }
+
+/// The IMDCT's output for every granule and channel (milestone 4), with the
+/// CRC-32 over each value as 32-bit little-endian.
+pub fn subbands(data: &[u8]) -> (Vec<[i64; 576]>, u32) {
+    let mut d = crate::Decoder::default();
+    let mut fx = crate::fixed::FixedBackend::new(HW);
+    fx.subband = Some(Vec::new());
+    for (pos, h) in find_frames(data) {
+        if let Some(f) = d.decode_frame(&data[pos..pos + h.frame_len()]) {
+            fx.decode(&f);
+        }
+    }
+    let out = fx.subband.take().unwrap_or_default();
+    let mut crc = Crc32::default();
+    for g in &out {
+        for v in g {
+            crc.update(&(*v as i32).to_le_bytes());
+        }
+    }
+    (out, crc.value())
+}
