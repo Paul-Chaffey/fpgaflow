@@ -141,7 +141,7 @@ CRC, underruns, the PCM FIFO fill, the controls and the playing rate
 
 Results: the 18 vector streams (5160 frames, 9.9 million PCM samples) match
 the model in simulation and on the board, as do the 45 generated test
-streams and a full 4:16 track (PCM CRCs, played in real time with no
+streams and a full 2:50 track (PCM CRCs, played in real time with no
 underruns); 7.0k slices (52%), 31 of 32 block RAMs, 14 multipliers; 48 MHz
 with 0.75 ns to spare. Simulation now takes 1.5 hours for the full set
 (`build/vectors/list.txt` can name a subset; the IMDCT and synthesis are
