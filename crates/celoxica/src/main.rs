@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use fpgaflow_celoxica::{check_bitstream, Board, Error};
 
-const USAGE: &str = "usage: fpgaflow-celoxica status | load FILE.bit | flash-list | flash-read OUT.tar | flash-write FILE.bit [INDEX] | usb-write FILE | usb-read N [OUT] | play AUDIOFILE | mp3-play FILE.mp3 | mp3-check FILE.mp3 | --version";
+const USAGE: &str = "usage: fpgaflow-celoxica status | load FILE.bit | flash-list | flash-read OUT.tar | flash-write FILE.bit [INDEX] | usb-write FILE | usb-read N [OUT] | play AUDIOFILE | mp3-play FILE.mp3 [--monitor] | mp3-check FILE.mp3 [--monitor] | --version";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -28,8 +28,10 @@ fn main() -> ExitCode {
         ["flash-list"] => flash_list(),
         ["usb-write", file] => usb_write(file),
         ["play", file] => play(file),
-        ["mp3-check", file] => mp3_check(file),
-        ["mp3-play", file] => mp3_play(file),
+        ["mp3-check", file] => mp3_check(file, false),
+        ["mp3-check", file, "--monitor"] => mp3_check(file, true),
+        ["mp3-play", file] => mp3_play(file, false),
+        ["mp3-play", file, "--monitor"] => mp3_play(file, true),
         ["usb-read", n] | ["usb-read", n, _] => match n.parse() {
             Ok(n) => usb_read(n, args.get(2).map(String::as_str)),
             Err(_) => {
@@ -396,7 +398,7 @@ fn play_on_decoder(file: &str) -> Result<(), Error> {
     let body = strip_id3(&data);
     let in_frames: usize = find_frames(body).iter().map(|(_, h)| h.frame_len()).sum();
     if in_frames * 10 >= body.len() * 9 {
-        return mp3_play_bytes(file, body);
+        return mp3_play_bytes(file, body, false);
     }
     println!("{file} isn't MPEG-1 Layer III: converting it with ffmpeg");
     let out = std::process::Command::new("ffmpeg")
@@ -429,24 +431,24 @@ fn play_on_decoder(file: &str) -> Result<(), Error> {
             String::from_utf8_lossy(&out.stderr).trim()
         )));
     }
-    mp3_play_bytes(file, strip_id3(&out.stdout))
+    mp3_play_bytes(file, strip_id3(&out.stdout), false)
 }
 
 /// Play an MP3 on the RC10's decoder (examples/rc10-mp3).
-fn mp3_play(file: &str) -> Result<(), Error> {
+fn mp3_play(file: &str, monitor: bool) -> Result<(), Error> {
     use fpgaflow_mp3model::frontend::strip_id3;
     let data = std::fs::read(file).map_err(|e| Error::File(file.to_string(), e))?;
-    mp3_play_bytes(file, strip_id3(&data))
+    mp3_play_bytes(file, strip_id3(&data), monitor)
 }
 
 /// Stream MP3 bytes to the decoder. The FPGA paces the stream: this returns
 /// when the last sample is in the DAC FIFO.
-fn mp3_play_bytes(file: &str, sent: &[u8]) -> Result<(), Error> {
+fn mp3_play_bytes(file: &str, sent: &[u8], monitor: bool) -> Result<(), Error> {
     let b = open()?;
     wait_idle(&b)?;
     println!("playing {file} ({} bytes)", sent.len());
     let t = Instant::now();
-    b.usb_send(sent)?;
+    send(&b, sent, monitor)?;
     // The decoder drains its buffers (well under a second).
     let mut last = mp3_status(&b)?.0.samples;
     loop {
@@ -471,11 +473,92 @@ fn mp3_play_bytes(file: &str, sent: &[u8]) -> Result<(), Error> {
     Ok(())
 }
 
+/// Send a stream; with `monitor`, a second thread reads the status 30 times
+/// a second meanwhile (can the FX2 serve reads while a write is held back
+/// by FULL?) and the read latencies and sample-count steps are reported.
+fn send(b: &Board, data: &[u8], monitor: bool) -> Result<(), Error> {
+    if !monitor {
+        return b.usb_send(data);
+    }
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let done = AtomicBool::new(false);
+    let (sent, stats) = std::thread::scope(|s| {
+        let reader = s.spawn(|| {
+            let period = Duration::from_millis(33);
+            let mut lat: Vec<f64> = Vec::new();
+            let mut steps: Vec<u32> = Vec::new();
+            let mut fails = 0u32;
+            let mut last: Option<u32> = None;
+            let mut next = Instant::now();
+            let mut shown = Instant::now();
+            let began = Instant::now();
+            while !done.load(Ordering::Relaxed) {
+                let t = Instant::now();
+                match mp3_status(b) {
+                    Ok((st, _)) => {
+                        lat.push(t.elapsed().as_secs_f64() * 1e3);
+                        if let Some(l) = last {
+                            steps.push(st.samples.wrapping_sub(l));
+                        }
+                        last = Some(st.samples);
+                        if shown.elapsed() >= Duration::from_secs(1) {
+                            shown = Instant::now();
+                            print!(
+                                "\r  {} samples, {} reads, {} failed   ",
+                                st.samples,
+                                lat.len(),
+                                fails
+                            );
+                            let _ = std::io::Write::flush(&mut std::io::stdout());
+                        }
+                    }
+                    Err(e) => {
+                        fails += 1;
+                        if fails <= 3 {
+                            eprintln!("\n  read failed: {e}");
+                        }
+                    }
+                }
+                next += period;
+                if let Some(w) = next.checked_duration_since(Instant::now()) {
+                    std::thread::sleep(w); // (the read cadence, not a wait for an event)
+                }
+            }
+            (lat, steps, fails, began.elapsed().as_secs_f64())
+        });
+        let r = b.usb_send(data);
+        done.store(true, Ordering::Relaxed);
+        (r, reader.join().expect("reader thread"))
+    });
+    let (mut lat, steps, fails, secs) = stats;
+    lat.sort_by(|a, b| a.total_cmp(b));
+    if !lat.is_empty() {
+        let mean = lat.iter().sum::<f64>() / lat.len() as f64;
+        let nz: Vec<u32> = steps.iter().copied().filter(|&d| d > 0).collect();
+        println!(
+            "\n  monitor: {} reads ({:.1}/s), {} failed; latency min {:.2} / mean {:.2} / p99 {:.2} / max {:.2} ms; \
+             sample steps min {} max {} ({} of {} reads saw no new samples)",
+            lat.len(),
+            lat.len() as f64 / secs,
+            fails,
+            lat[0],
+            mean,
+            lat[(lat.len() * 99 / 100).min(lat.len() - 1)],
+            lat[lat.len() - 1],
+            nz.iter().min().unwrap_or(&0),
+            nz.iter().max().unwrap_or(&0),
+            steps.len() - nz.len(),
+            steps.len()
+        );
+    }
+    sent
+}
+
 /// Stream an MP3 to the decoder and compare what it found with the model:
 /// frame count, bytes in frames, the CRC over every frame's header and side
 /// info, undecodable frames (milestone 1); granules and the CRC over their
 /// scale factors and Huffman values (milestone 2).
-fn mp3_check(file: &str) -> Result<(), Error> {
+fn mp3_check(file: &str, monitor: bool) -> Result<(), Error> {
     use fpgaflow_mp3model::frontend::{granules, pcm, records, spectra, strip_id3, subbands};
     let data = std::fs::read(file).map_err(|e| Error::File(file.to_string(), e))?;
     let sent = strip_id3(&data);
@@ -487,7 +570,7 @@ fn mp3_check(file: &str) -> Result<(), Error> {
     let b = open()?;
     wait_idle(&b)?;
     let t = Instant::now();
-    b.usb_send(sent)?;
+    send(&b, sent, monitor)?;
     let secs = t.elapsed().as_secs_f64();
     // The last frame is accepted when the stream goes idle.
     let start = Instant::now();

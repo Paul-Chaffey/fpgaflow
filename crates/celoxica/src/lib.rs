@@ -201,8 +201,9 @@ pub struct Board {
     pub address: u8,
     /// The alternate setting last selected. Every SET_INTERFACE makes the
     /// firmware reset its FIFOs (losing data in flight), so it is only sent
-    /// when the setting changes.
-    alt: std::cell::Cell<Option<u8>>,
+    /// when the setting changes. (A mutex, so one thread can stream while
+    /// another reads the design's status.)
+    alt: std::sync::Mutex<Option<u8>>,
 }
 
 impl Board {
@@ -231,7 +232,7 @@ impl Board {
                 part,
                 bus: dev.bus_number(),
                 address: dev.address(),
-                alt: std::cell::Cell::new(None),
+                alt: std::sync::Mutex::new(None),
             });
         }
         Err(Error::NotFound)
@@ -285,10 +286,11 @@ impl Board {
 
 impl Board {
     fn set_alt(&self, alt: u8) -> Result<(), Error> {
-        if self.alt.get() != Some(alt) {
-            self.alt.set(None);
+        let mut cur = self.alt.lock().unwrap_or_else(|e| e.into_inner());
+        if *cur != Some(alt) {
+            *cur = None;
             self.handle.set_alternate_setting(0, alt)?;
-            self.alt.set(Some(alt));
+            *cur = Some(alt);
         }
         Ok(())
     }
