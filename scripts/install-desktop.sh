@@ -27,7 +27,8 @@ refresh() {
 
 if [[ "${1:-}" == "--uninstall" ]]; then
   rm -fv "${files[@]}"
-  find "$data/icons/hicolor" -path '*/apps/fpgaflow.png' -print -delete 2>/dev/null || true
+  find "$data/icons/hicolor" \( -path '*/apps/fpgaflow.png' -o -path '*/apps/fpgaflow-player.png' \
+    -o -path '*/apps/fpgaflow-player.svg' \) -print -delete 2>/dev/null || true
   refresh
   exit 0
 fi
@@ -39,8 +40,13 @@ install -Dm755 "$repo/target/release/fpgaflow-celoxica" "$bin/fpgaflow-celoxica"
 install -Dm755 "$repo/target/release/fpgaflow-player" "$bin/fpgaflow-player"
 
 for d in "$repo"/data/icons/hicolor/*/; do
-  install -Dm644 "$d/apps/fpgaflow.png" "$data/icons/hicolor/$(basename "$d")/apps/fpgaflow.png"
+  for icon in fpgaflow fpgaflow-player; do
+    if [[ -f "$d/apps/$icon.png" ]]; then
+      install -Dm644 "$d/apps/$icon.png" "$data/icons/hicolor/$(basename "$d")/apps/$icon.png"
+    fi
+  done
 done
+install -Dm644 "$repo/data/icons/fpgaflow-player.svg" "$data/icons/hicolor/scalable/apps/fpgaflow-player.svg"
 sed "s|@BIN@|$bin/fpgaflow-gui|" "$repo/data/desktop/fpgaflow.desktop" \
   | install -Dm644 /dev/stdin "$data/applications/fpgaflow.desktop"
 sed "s|@BIN@|$bin/fpgaflow-player|" "$repo/data/desktop/fpgaflow-player.desktop" \

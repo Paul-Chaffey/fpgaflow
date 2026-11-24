@@ -5,11 +5,17 @@
 mod app;
 
 fn main() -> eframe::Result {
-    let viewport = eframe::egui::ViewportBuilder::default()
+    let mut viewport = eframe::egui::ViewportBuilder::default()
         .with_title("RC10 Player")
         .with_app_id("fpgaflow-player")
         .with_inner_size([1040.0, 700.0])
         .with_min_inner_size([780.0, 520.0]);
+    // X11 uses this; Wayland takes the icon from fpgaflow-player.desktop.
+    const ICON: &[u8] =
+        include_bytes!("../../../data/icons/hicolor/256x256/apps/fpgaflow-player.png");
+    if let Ok(icon) = eframe::icon_data::from_png_bytes(ICON) {
+        viewport = viewport.with_icon(icon);
+    }
     let options = eframe::NativeOptions {
         viewport,
         ..Default::default()
