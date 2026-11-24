@@ -341,7 +341,7 @@ pub fn spectral_sv() -> String {
 /// SystemVerilog for milestone 4: the IMDCT coefficient ROM (cosine x
 /// window, 18-bit signed with 17 fraction bits). Address = 648 * w + 18 * i
 /// + k for long blocks (w = 0, 1, 2 for block types 0, 1, 3; i = 0..35,
-/// k = 0..17), 1944 + 6 * i + k for the short block (i = 0..11, k = 0..5).
+///   k = 0..17), 1944 + 6 * i + k for the short block (i = 0..11, k = 0..5).
 pub fn imdct_sv() -> String {
     let (long, short) = imdct_coefs(&HW);
     let mut words = Vec::new();

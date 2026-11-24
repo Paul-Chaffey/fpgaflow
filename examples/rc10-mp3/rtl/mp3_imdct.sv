@@ -101,7 +101,7 @@ module mp3_imdct (
 
     // ------------------------------------------------------------ control
     typedef enum logic [3:0] {
-        I_CLR, I_IN, I_SB, I_ZCLR, I_OUT, I_MAC, I_ZW, I_EMIT, I_EMIT1, I_EMIT2, I_EMIT2B, I_EMIT3
+        I_CLR, I_IN, I_SB, I_ZCLR, I_OUT, I_MAC, I_ZR, I_ZW, I_EMIT, I_EMIT1, I_EMIT2, I_EMIT2B, I_EMIT3
     } istate_t;
     istate_t st = I_CLR;
     // Ready only for the first byte of a channel: the sender's data lag its
@@ -124,7 +124,7 @@ module mp3_imdct (
     // z index of the MAC's output (registered in I_OUT), its rounded sum
     // (registered when done), and the emit step's z[t] and sums.
     logic [5:0] zi = '0;
-    logic signed [25:0] rr = '0, zt = '0, sreg = '0;
+    logic signed [25:0] rr = '0, zt = '0, sreg = '0, zold = '0;
     always_comb begin
         z_we = 1'b0;
         z_widx = '0;
@@ -136,7 +136,7 @@ module mp3_imdct (
         end else if (st == I_ZW) begin
             z_we = 1'b1;
             z_widx = zi;
-            z_wdata = short_sb ? sat26(48'(z_r) + 48'(rr)) : rr;
+            z_wdata = short_sb ? sat26(48'(zold) + 48'(rr)) : rr;
         end else if (st == I_EMIT) begin
             z_ridx = 6'(t);
         end else if (st == I_EMIT1) begin
@@ -213,8 +213,12 @@ module mp3_imdct (
                 end
                 if (acc_done) begin
                     rr <= rnd17(acc);
-                    st <= I_ZW;
+                    st <= I_ZR;
                 end
+            end
+            I_ZR: begin                        // read z[zi] (short blocks add to it)
+                zold <= z_r;
+                st <= I_ZW;
             end
             I_ZW: begin                        // z written (above); next output
                 begin
