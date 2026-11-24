@@ -83,6 +83,8 @@ pub const BOOT_FILE: u8 = 1;
 const FLASH_READ_CHUNK: u32 = 64 * 1024;
 const FLASH_WRITE_CHUNK: usize = 2 * 1024 * 1024;
 const FLASH_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a command may be refused while the flash is busy.
+const FLASH_BUSY: Duration = Duration::from_secs(10);
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -291,10 +293,24 @@ impl Board {
         Ok(())
     }
 
+    /// Send a `0x43` command. While the firmware is still busy with the
+    /// last flash operation (about 10 ms after an erase, 50 ms after an
+    /// append's data), it stalls the request without acting on it; the
+    /// command is then sent again until it is accepted (up to FLASH_BUSY).
     fn command(&self, packet: [u8; 10]) -> Result<(), Error> {
-        self.handle
-            .write_control(0x40, REQ_COMMAND, 0, 0, &packet, FLASH_TIMEOUT)?;
-        Ok(())
+        let start = Instant::now();
+        loop {
+            match self
+                .handle
+                .write_control(0x40, REQ_COMMAND, 0, 0, &packet, FLASH_TIMEOUT)
+            {
+                Ok(_) => return Ok(()),
+                Err(rusb::Error::Pipe) if start.elapsed() < FLASH_BUSY => {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
     }
 
     /// Read exactly `n` bytes from the bulk IN endpoint.

@@ -46,9 +46,23 @@ implemented in `crates/celoxica` (`fpgaflow-celoxica`).
 
 `0x43` command packets are 10 or 20 bytes: byte 0 = command, then big-endian
 fields copied from the IOCTL input. These drive the NAND flash file system,
-the clocks and on-board RAM. They are only partly decoded and fpgaflow never
-sends them, so the board's flash (Celoxica's demos, file 1 = boot image) is
-never touched.
+the clocks and on-board RAM. fpgaflow sends only the flash file commands
+(file 1 is the boot image; the others hold Celoxica's demos):
+
+| Command | Packet | Host library |
+|---|---|---|
+| `00` read | `[00, index, bytes (BE32), start (BE32)]`, then bulk IN `0x86` | `RCFlashIndexRead` |
+| `02` erase | `[02, index]` | `RCFlashIndexErase` |
+| `03` append | `[03, index, bytes (BE32)]`, then exactly that many bytes on bulk OUT `0x02` (RC.dll: at most 2 MiB per command) | `RCFlashIndexAppend` |
+| `04` length | `[04, index]`, then 4 bytes LE on bulk IN | `RCFlashIndexGetLength` |
+
+All in alternate setting 1 (RC.dll "mode 2"). While the firmware is still
+busy with the last operation (measured 2026-11-24: about 10 ms after an
+erase of a 650 KB file, 50 ms after an append's data), it stalls the next
+`0x43` request without acting on it; the request succeeds when repeated.
+fpgaflow repeats it for up to 10 s. (Sending the append straight after the
+erase failed this way on the first try: the file was erased, nothing else
+changed.)
 
 ## Configuring the FPGA (`RCDeviceConfigureFromImage`, RC.dll 0x10005f00)
 
