@@ -33,12 +33,15 @@ module controls #(
             held <= s1 & s2;
             if (press[2] && v != 4'd15) v <= v + 4'd1;
             if (press[3] && v != 4'd0)  v <= v - 4'd1;
-            if (press[0]) z <= ~z;
-            if (press[1]) b <= b + 2'd1;
+            // joy[0]/joy[1] are named JOY_LEFT/JOY_RIGHT in the board's pin
+            // file, but on the board they are the other way round (Paul,
+            // 2026-11-24): right is joy[0], left is joy[1].
+            if (press[1]) z <= ~z;
+            if (press[0]) b <= b + 2'd1;
             if (press[4]) p <= ~p;
         end
         vol_key <= div == '0 && (press[2] || press[3]);
-        bass_key <= div == '0 && press[1];
+        bass_key <= div == '0 && press[0];
     end
     assign vol = v;
     assign paused = p;
