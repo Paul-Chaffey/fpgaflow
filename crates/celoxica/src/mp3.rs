@@ -223,31 +223,63 @@ pub struct Source {
     pub channels: usize,
     /// Length in seconds, when known (MP3 files; not while converting).
     pub duration: Option<f64>,
+    /// Where in the song this source starts, in seconds (after a seek).
+    pub start: f64,
     /// Whether ffmpeg is converting it.
     pub converted: bool,
     child: Option<std::process::Child>,
 }
 
+/// A file's length in seconds, from ffprobe.
+fn probe_duration(path: &std::path::Path) -> Option<f64> {
+    let out = std::process::Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "csv=p=0",
+        ])
+        .arg(path)
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+}
+
 impl Source {
     pub fn open(path: &std::path::Path) -> Result<Source, Error> {
+        Source::open_at(path, 0.0)
+    }
+
+    /// Open a song `start` seconds in: for an MP3, at the frame nearest that
+    /// time (the player treats it as a new stream, so frames that borrow
+    /// data from before it are skipped cleanly); otherwise ffmpeg seeks.
+    pub fn open_at(path: &std::path::Path, start: f64) -> Result<Source, Error> {
         let data =
             std::fs::read(path).map_err(|e| Error::Other(format!("{}: {e}", path.display())))?;
         if let Some(rate) = mp3_rate(&data) {
-            let body = fpgaflow_mp3model::frontend::strip_id3(&data).to_vec();
-            let frames = fpgaflow_mp3model::find_frames(&body);
+            let body = fpgaflow_mp3model::frontend::strip_id3(&data);
+            let frames = fpgaflow_mp3model::find_frames(body);
             let channels = frames.first().map_or(2, |(_, h)| h.channels());
             let hz = [44100.0, 48000.0, 32000.0][rate.min(2)];
+            let i = ((start.max(0.0) * hz / 1152.0).round() as usize)
+                .min(frames.len().saturating_sub(1));
+            let at = frames.get(i).map_or(0, |(p, _)| *p);
             return Ok(Source {
-                reader: Box::new(std::io::Cursor::new(body)),
+                reader: Box::new(std::io::Cursor::new(body[at..].to_vec())),
                 rate,
                 channels,
                 duration: Some(frames.len() as f64 * 1152.0 / hz),
+                start: i as f64 * 1152.0 / hz,
                 converted: false,
                 child: None,
             });
         }
+        let start = start.max(0.0);
         let mut child = std::process::Command::new("ffmpeg")
-            .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-i"])
+            .args(["-hide_banner", "-loglevel", "error", "-nostdin"])
+            .args(["-ss", &format!("{start:.3}"), "-i"])
             .arg(path)
             .args([
                 "-vn",
@@ -278,7 +310,8 @@ impl Source {
             reader: Box::new(out),
             rate: 0,
             channels: 2,
-            duration: None,
+            duration: probe_duration(path),
+            start,
             converted: true,
             child: Some(child),
         })
@@ -317,13 +350,18 @@ pub enum Command {
     Eq(Option<[f64; 10]>),
     Pause(bool),
     Stop,
+    /// Jump to this many seconds into the song.
+    Seek(f64),
 }
 
 /// How a song ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Ended {
     Finished,
     Stopped,
+    /// A seek was asked for: reopen the song there (`Source::open_at`), wait
+    /// for the player to be idle, and stream again.
+    Seek(f64),
 }
 
 /// Stream a song to an "M6" player: MP3 records of [`CHUNK`] bytes, with
@@ -344,7 +382,7 @@ pub fn stream_song(
             Command::Bass(v) => b.usb_send(&record(T_BASS, &[(*v).min(3)])),
             Command::Eq(g) => b.usb_send(&eq_record(rate, g.as_ref())),
             Command::Pause(p) => b.usb_send(&record(T_PAUSE, &[*p as u8])),
-            Command::Stop => Ok(()),
+            Command::Stop | Command::Seek(_) => Ok(()),
         }
     };
     for c in start {
@@ -367,6 +405,12 @@ pub fn stream_song(
                 }
             };
             match c {
+                Command::Seek(t) => {
+                    if paused {
+                        b.usb_send(&record(T_PAUSE, &[0]))?;
+                    }
+                    return Ok(Ended::Seek(t));
+                }
                 Command::Stop => {
                     if paused {
                         b.usb_send(&record(T_PAUSE, &[0]))?;

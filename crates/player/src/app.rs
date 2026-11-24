@@ -65,6 +65,8 @@ enum Msg {
         channels: usize,
         duration: Option<f64>,
         converted: bool,
+        /// Where in the song this stream starts (seconds).
+        start: f64,
     },
     Ended {
         song: usize,
@@ -89,6 +91,12 @@ pub struct App {
     channels: usize,
     duration: Option<f64>,
     converted: bool,
+    /// Where the current stream starts in the song, and (until the board's
+    /// sample count has restarted for it) the count it had before.
+    start_offset: f64,
+    await_reset: Option<u32>,
+    /// The position slider while it is being dragged.
+    seek_drag: Option<f64>,
     board: Option<Arc<Board>>,
     board_err: Option<String>,
     shared: Arc<Mutex<Shared>>,
@@ -125,6 +133,9 @@ impl App {
             channels: 2,
             duration: None,
             converted: false,
+            start_offset: 0.0,
+            await_reset: None,
+            seek_drag: None,
             board: None,
             board_err: None,
             shared: Arc::new(Mutex::new(Shared::default())),
@@ -254,6 +265,27 @@ impl App {
     }
 
     fn play(&mut self, i: usize) {
+        self.play_at(i, 0.0);
+    }
+
+    /// Jump to `t` seconds into the current song (or start it there).
+    fn seek(&mut self, t: f64) {
+        match (self.state, &self.song_tx) {
+            (State::Playing | State::Paused, Some(tx)) => {
+                let _ = tx.send(Command::Seek(t));
+                self.state = State::Playing;
+                self.start_offset = t;
+                self.await_reset = self.status().map(|s| s.samples).filter(|&n| n > 0);
+            }
+            _ => {
+                if let Some(i) = self.current.or(self.selected) {
+                    self.play_at(i, t);
+                }
+            }
+        }
+    }
+
+    fn play_at(&mut self, i: usize, at: f64) {
         let Some(b) = self.board.clone() else {
             self.message = Some((false, "no RC10 connected".into()));
             return;
@@ -272,6 +304,8 @@ impl App {
         self.selected = Some(i);
         self.state = State::Playing;
         self.duration = None;
+        self.start_offset = at;
+        self.await_reset = self.status().map(|s| s.samples).filter(|&n| n > 0);
         let path = self.songs[i].clone();
         let start = vec![self.eq_command()];
         let msg = self.msg_tx.clone();
@@ -282,17 +316,33 @@ impl App {
                 let _ = h.join();
             }
             let r = (|| -> Result<Ended, fpgaflow_celoxica::Error> {
+                // A new song waits for the last one to play out; a seek only
+                // for the stream to end (the new stream drops what the
+                // decoder still held of the old position).
                 b.mp3_wait_idle(Duration::from_secs(5))?;
-                b.mp3_wait_drained(Duration::from_secs(5))?;
-                let mut src = Source::open(&path)?;
-                let _ = msg.send(Msg::Started {
-                    song: i,
-                    channels: src.channels,
-                    duration: src.duration,
-                    converted: src.converted,
-                });
-                ctx.request_repaint();
-                mp3::stream_song(&b, &mut src, &start, &rx)
+                if at == 0.0 {
+                    b.mp3_wait_drained(Duration::from_secs(5))?;
+                }
+                let mut at = at;
+                loop {
+                    let mut src = Source::open_at(&path, at)?;
+                    let _ = msg.send(Msg::Started {
+                        song: i,
+                        channels: src.channels,
+                        duration: src.duration,
+                        converted: src.converted,
+                        start: src.start,
+                    });
+                    ctx.request_repaint();
+                    match mp3::stream_song(&b, &mut src, &start, &rx)? {
+                        Ended::Seek(t) => {
+                            drop(src);
+                            at = t;
+                            b.mp3_wait_idle(Duration::from_secs(5))?;
+                        }
+                        e => return Ok(e),
+                    }
+                }
             })();
             let _ = msg.send(Msg::Ended {
                 song: i,
@@ -359,11 +409,13 @@ impl App {
                 channels,
                 duration,
                 converted,
+                start,
             } => {
                 if self.current == Some(song) {
                     self.channels = channels.max(1);
                     self.duration = duration;
                     self.converted = converted;
+                    self.start_offset = start;
                 }
             }
             Msg::Ended { song, result } => {
@@ -439,9 +491,21 @@ impl App {
                     .map(|i| self.song_name(i))
                     .unwrap_or_else(|| "—".into());
                 ui.label(RichText::new(title).size(18.0).strong());
+                // The board's sample count restarts with each stream; until it
+                // has, the new stream hasn't begun playing.
+                if let (Some(seen), Some(s)) = (self.await_reset, &st) {
+                    if s.samples < seen {
+                        self.await_reset = None;
+                    }
+                }
                 let elapsed = match (&st, self.state) {
                     (Some(s), State::Playing | State::Paused) => {
-                        s.samples as f64 / (self.channels as f64 * s.rate_hz() as f64)
+                        self.start_offset
+                            + if self.await_reset.is_some() {
+                                0.0
+                            } else {
+                                s.samples as f64 / (self.channels as f64 * s.rate_hz() as f64)
+                            }
                     }
                     _ => 0.0,
                 };
@@ -458,10 +522,20 @@ impl App {
                 }
                 ui.label(line);
                 if let Some(d) = self.duration {
-                    ui.add(
-                        egui::ProgressBar::new((elapsed / d).clamp(0.0, 1.0) as f32)
-                            .desired_width(420.0),
-                    );
+                    // The position: drag (or click) to jump there.
+                    let mut v = self.seek_drag.unwrap_or(elapsed.min(d));
+                    ui.spacing_mut().slider_width = 420.0;
+                    let r = ui
+                        .add(egui::Slider::new(&mut v, 0.0..=d).show_value(false))
+                        .on_hover_text("Drag to move through the song");
+                    if r.dragged() {
+                        self.seek_drag = Some(v);
+                    } else {
+                        if r.drag_stopped() || r.changed() {
+                            self.seek(v);
+                        }
+                        self.seek_drag = None;
+                    }
                 }
             });
         });
