@@ -3,6 +3,7 @@
 // Tone control (rtl/eq.sv) against crates/mp3model/src/eq.rs (`Equalizer`):
 // build/eq-vectors.txt (`mp3model eq-vectors build/eq-vectors.txt`) holds
 //   S rate level in_l in_r out_l out_r   one stereo sample; both outputs must match
+//   L snaps l0 .. l9                     the analyser's snapshot after that sample
 //   C on c0 .. c49                       from the next sample: EQ on/off and a set
 // A set is written into the bank not in use on the write clock (as the USB
 // side does), then the banks swap. Run with
@@ -13,13 +14,17 @@ module tb_eq;
     always #11.3379 clk = ~clk;            // 44.1 MHz, the DAC clock
     always #10.4167 wclk = ~wclk;          // 48 MHz, the USB side
 
-    logic start = 0, done, on = 0, bank = 0;
+    logic start = 0, done, busy, on = 0, bank = 0;
+    logic [159:0] levels;
+    logic [7:0] snaps;
+    integer nsnap = 0, ws, wv;
     logic [1:0] rate = '0, level = '0;
     logic signed [15:0] in_l = '0, in_r = '0, out_l, out_r;
     logic cw_en = 0;
     logic [6:0] cw_addr = '0;
     logic signed [24:0] cw_data = '0;
     eq dut (.clk, .start, .rate, .level, .on, .bank, .in_l, .in_r, .out_l, .out_r, .done,
+            .busy, .levels, .snaps,
             .wclk, .cw_en, .cw_addr, .cw_data);
 
     integer fd, n = 0, sets = 0, errors = 0, cyc, worst = 0, worst_on = 0, t, v, onv;
@@ -69,12 +74,31 @@ module tb_eq;
                                  n, r, lv, on, il, ir, out_l, out_r, wl, wr);
                     errors = errors + 1;
                 end
+                // The analyser finishes before the next sample (as on the board).
+                cyc = 0;
+                while (busy && cyc < 1000) begin @(posedge clk); #1 cyc = cyc + 1; end
                 n = n + 1;
+            end else if (t == "L") begin
+                void'($fscanf(fd, "%d", ws));
+                if (snaps != ws[7:0]) begin
+                    if (errors < 10) $display("FAIL: after sample %0d: snapshot %0d, model %0d", n - 1, snaps, ws);
+                    errors = errors + 1;
+                end
+                for (int b = 0; b < 10; b++) begin
+                    void'($fscanf(fd, "%d", wv));
+                    if (levels[16 * b +: 16] != wv[15:0]) begin
+                        if (errors < 10) $display("FAIL: after sample %0d: band %0d level %0d, model %0d",
+                                                  n - 1, b, levels[16 * b +: 16], wv);
+                        errors = errors + 1;
+                    end
+                end
+                nsnap = nsnap + 1;
+                void'($fgetc(fd));
             end
         end
         if (errors == 0 && n > 0)
-            $display("PASS: %0d stereo samples, %0d settings changes match the model; %0d clocks per sample (EQ off), %0d (on)",
-                     n, sets, worst, worst_on);
+            $display("PASS: %0d stereo samples, %0d settings changes, %0d level snapshots match the model; %0d clocks to the outputs (EQ off), %0d (on)",
+                     n, sets, nsnap, worst, worst_on);
         else
             $display("FAIL: %0d of %0d samples differ", errors, n);
         $finish;

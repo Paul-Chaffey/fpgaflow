@@ -16,8 +16,15 @@
 // side) at {bank, 5 band + k} and read here from bank `bank`, latched with
 // each sample: the host writes the bank not in use, then swaps.
 //
-// About 10 clocks per section: 21 per stereo sample with the EQ off (as
-// stage 1), about 230 with it on; a sample comes every 1000 or 1500 clocks.
+// Stage 3, the analyser: after both channels (`done`), 10 band-passes (Q 2,
+// 31 Hz..16 kHz) of the mono sum (out_l + out_r) >>> 1 run on the same MAC,
+// their states in the spare slots {11 + band/2, band % 2}; per band a peak
+// envelope env = max(|y|, env - env >>> 13) (about 190 ms release). Every
+// 256 samples `levels` takes min(env >>> 8, 65535) per band and `snaps`
+// counts up.
+//
+// About 10 clocks per section: about 125 per stereo sample with the EQ off,
+// about 330 with it on; a sample comes every 1000 or 1500 clocks.
 module eq (
     input  logic               clk,         // the DAC clock
     input  logic               start,       // a new sample pair
@@ -29,7 +36,11 @@ module eq (
     input  logic signed [15:0] in_r,
     output logic signed [15:0] out_l = '0,
     output logic signed [15:0] out_r = '0,
-    output logic               done = 1'b0,
+    output logic               done = 1'b0,  // the outputs are ready
+    output logic               busy,         // (the analyser may still run)
+    // the analyser's snapshot: band b at [16 b +: 16]
+    output logic [159:0]       levels = '0,
+    output logic [7:0]         snaps = '0,
     // coefficient writes, on the USB side's clock
     input  logic               wclk,
     input  logic               cw_en,
@@ -71,7 +82,17 @@ module eq (
     logic signed [CW-1:0] bass_c;
     eq_bass_coef u_coef (.rate(rate_r), .level(level_r), .k, .c(bass_c));
     wire signed [CW-1:0] band_c = $signed(cram[{bank_r, cbase + 6'(k)}]);
-    wire signed [CW-1:0] coef = s == 4'd0 ? bass_c : band_c;
+    logic       an = 1'b0;                       // analysing
+    logic [3:0] ab = '0;                         // analyser band
+    logic signed [CW-1:0] bpf_c;
+    eq_bpf_coef u_bpf (.rate(rate_r), .band(ab), .k, .c(bpf_c));
+    wire signed [CW-1:0] coef = an ? bpf_c : s == 4'd0 ? bass_c : band_c;
+    // Envelopes in LUT RAM: updated a band at a time, read out a band at a
+    // time for the snapshot.
+    (* ram_style = "distributed" *) logic [26:0] env [0:15];
+    initial for (int i = 0; i < 16; i++) env[i] = '0;
+    logic [3:0] sb = '0;                         // snapshot band
+    logic [7:0] cnt = '0;                        // samples, for the snapshots
 
     // ---- MAC: operands registered, product registered, then accumulated
     logic                 issuing = 1'b0;
@@ -83,8 +104,10 @@ module eq (
     logic       lastp = 1'b0, last1 = 1'b0, last2 = 1'b0;
     logic signed [DW-1:0] y_r = '0;
 
-    typedef enum logic [2:0] { E_IDLE, E_SEC, E_MAC, E_WAIT, E_RND, E_OUT } estate_t;
+    typedef enum logic [3:0] { E_IDLE, E_SEC, E_MAC, E_WAIT, E_RND, E_OUT, E_ENV, E_SNAP } estate_t;
     estate_t st = E_IDLE;
+    assign busy = st != E_IDLE;
+    wire [26:0] env_rd = env[st == E_SNAP ? sb : ab];
 
     always_ff @(posedge clk) begin
         done <= 1'b0;
@@ -145,13 +168,46 @@ module eq (
                 sx1[sa] <= xin;
                 sy2[sa] <= y1;
                 sy1[sa] <= y;
-                xin <= y;                   // the next section's input
-                if (on_r && s != 4'd10) begin
+                if (an) begin               // an analyser band: its envelope next
+                    y_r <= y;
+                    st <= E_ENV;
+                end else if (on_r && s != 4'd10) begin
+                    xin <= y;               // the next section's input
                     s <= s + 1'b1;
                     st <= E_SEC;
                 end else begin
                     y_r <= y;
                     st <= E_OUT;
+                end
+            end
+            E_ENV: begin                    // peak envelope of band ab
+                logic [26:0] a, dec;
+                a = y_r < 0 ? -27'(y_r) : 27'(y_r);   // (widen, then negate: |-2^25| fits)
+                dec = env_rd - (env_rd >> 13);
+                env[ab] <= a > dec ? a : dec;
+                if (ab != 4'd9) begin
+                    ab <= ab + 1'b1;
+                    s  <= 4'(11 + ((ab + 1'b1) >> 1));
+                    ch <= ~ch;
+                    st <= E_SEC;
+                end else begin
+                    cnt <= cnt + 1'b1;
+                    sb <= '0;
+                    if (cnt == 8'd255) begin
+                        st <= E_SNAP;           // every 256 samples
+                    end else begin
+                        an <= 1'b0;
+                        st <= E_IDLE;
+                    end
+                end
+            end
+            E_SNAP: begin                   // the levels, a band a cycle
+                levels[16 * sb +: 16] <= env_rd[26:24] != 3'd0 ? 16'hFFFF : env_rd[23:8];
+                sb <= sb + 1'b1;
+                if (sb == 4'd9) begin
+                    snaps <= snaps + 1'b1;
+                    an <= 1'b0;
+                    st <= E_IDLE;
                 end
             end
             E_OUT: begin                    // back to 16 bits
@@ -166,9 +222,17 @@ module eq (
                     xin <= DW'(in_r_r) <<< 8;
                     st <= E_SEC;
                 end else begin
+                    logic signed [16:0] m;
                     out_r <= 16'(o);
                     done <= 1'b1;
-                    st <= E_IDLE;
+                    // The analyser: band 0 first, on the mono sum.
+                    m = (17'(out_l) + 17'(16'(o))) >>> 1;
+                    xin <= DW'(m) <<< 8;
+                    an <= 1'b1;
+                    ab <= '0;
+                    s  <= 4'd11;
+                    ch <= 1'b0;
+                    st <= E_SEC;
                 end
             end
             default: st <= E_IDLE;

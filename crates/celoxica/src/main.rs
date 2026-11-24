@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use fpgaflow_celoxica::{check_bitstream, Board, Error};
 
-const USAGE: &str = "usage: fpgaflow-celoxica status | load FILE.bit | flash-list | flash-read OUT.tar | flash-write FILE.bit [INDEX] | usb-write FILE | usb-read N [OUT] | play AUDIOFILE | mp3-play FILE.mp3 [--monitor] | eq-play FILE [--eq G,..,G] [--eq-off] [--bass N] | mp3-check FILE.mp3 [--monitor] | --version";
+const USAGE: &str = "usage: fpgaflow-celoxica status | load FILE.bit | flash-list | flash-read OUT.tar | flash-write FILE.bit [INDEX] | usb-write FILE | usb-read N [OUT] | play AUDIOFILE | mp3-play FILE.mp3 [--monitor] | eq-play FILE [--eq G,..,G] [--eq-off] [--bass N] [--levels] | mp3-check FILE.mp3 [--monitor] | --version";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -385,17 +385,34 @@ fn wait_idle(b: &Board) -> Result<(), Error> {
     b.mp3_wait_idle(Duration::from_secs(3)).map(|_| ())
 }
 
-/// `eq-play FILE [--eq G,..,G] [--bass N]`: play any audio file on an "M6"
-/// player with the 10 EQ gains (dB, 31 Hz..16 kHz) and bass level sent as
-/// records first (tests stage 2 without the player app).
+/// `eq-play FILE [--eq G,..,G] [--eq-off] [--bass N] [--levels]`: play any
+/// audio file on an "M6" player with the 10 EQ gains (dB, 31 Hz..16 kHz) and
+/// bass level sent as records first; `--levels` shows the band levels as a
+/// text bar graph (tests stages 2-3 without the player app).
 fn eq_play(file: &str, opts: &[&str]) -> Result<(), Error> {
+    eq_play_rest(file, Vec::new(), false, opts)
+}
+
+fn eq_play_rest(
+    file: &str,
+    mut start: Vec<fpgaflow_celoxica::mp3::Command>,
+    mut show_levels: bool,
+    rest: &[&str],
+) -> Result<(), Error> {
     use fpgaflow_celoxica::mp3::{stream_song, Command, Source};
-    let mut start = Vec::new();
-    let mut it = opts.iter();
+    let mut it = rest.iter();
     while let Some(o) = it.next() {
-        match (*o, it.next()) {
-            ("--eq", Some(v)) => {
-                let g: Vec<f64> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+        match *o {
+            "--levels" => show_levels = true,
+            "--eq-off" => start.push(Command::Eq(None)),
+            "--bass" => start.push(Command::Bass(
+                it.next().and_then(|v| v.parse().ok()).unwrap_or(0),
+            )),
+            "--eq" => {
+                let g: Vec<f64> = it
+                    .next()
+                    .map(|v| v.split(',').filter_map(|x| x.trim().parse().ok()).collect())
+                    .unwrap_or_default();
                 if g.len() != 10 {
                     return Err(Error::Other(
                         "--eq takes 10 gains in dB, comma-separated".into(),
@@ -403,8 +420,6 @@ fn eq_play(file: &str, opts: &[&str]) -> Result<(), Error> {
                 }
                 start.push(Command::Eq(Some(std::array::from_fn(|i| g[i]))));
             }
-            ("--eq-off", _) => start.push(Command::Eq(None)),
-            ("--bass", Some(v)) => start.push(Command::Bass(v.parse().unwrap_or(0))),
             _ => return Err(Error::Other(format!("unknown option {o}"))),
         }
     }
@@ -426,7 +441,36 @@ fn eq_play(file: &str, opts: &[&str]) -> Result<(), Error> {
     );
     let (_tx, rx) = std::sync::mpsc::channel();
     let t = Instant::now();
-    stream_song(&b, &mut src, &start, &rx)?;
+    if show_levels {
+        // A text bar graph of the band levels, 5 times a second.
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let done = AtomicBool::new(false);
+        std::thread::scope(|sc| -> Result<(), Error> {
+            sc.spawn(|| {
+                const BARS: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+                while !done.load(Ordering::Relaxed) {
+                    if let Ok(s) = b.mp3_status() {
+                        let line: String = (0..10)
+                            .map(|i| {
+                                let v =
+                                    ((s.level_db(i) + 60.0) / 60.0 * 8.0).clamp(0.0, 7.0) as usize;
+                                format!("{}{} ", BARS[v], BARS[v])
+                            })
+                            .collect();
+                        print!("\r  31 Hz {line}16 kHz   ");
+                        let _ = std::io::Write::flush(&mut std::io::stdout());
+                    }
+                    std::thread::sleep(Duration::from_millis(200));
+                }
+            });
+            let r = stream_song(&b, &mut src, &start, &rx);
+            done.store(true, Ordering::Relaxed);
+            println!();
+            r.map(|_| ())
+        })?;
+    } else {
+        stream_song(&b, &mut src, &start, &rx)?;
+    }
     let s = b.mp3_status()?;
     println!(
         "sent in {:.1} s; {} frames, {} samples, {} underruns; bass b{}, EQ {} ({} sets, {} settings taken)",

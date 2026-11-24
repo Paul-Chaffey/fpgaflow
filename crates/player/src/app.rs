@@ -98,6 +98,9 @@ pub struct App {
     msg_rx: mpsc::Receiver<Msg>,
     eq_dirty: bool,
     eq_sent: Instant,
+    /// Level bars' peak markers: dB and when each was set.
+    peaks: [(f64, Instant); 10],
+    peaks_at: Instant,
     message: Option<(bool, String)>,
     ctx: egui::Context,
 }
@@ -131,6 +134,8 @@ impl App {
             msg_rx,
             eq_dirty: false,
             eq_sent: Instant::now(),
+            peaks: [(-60.0, Instant::now()); 10],
+            peaks_at: Instant::now(),
             message: None,
             ctx: cc.egui_ctx.clone(),
         };
@@ -204,7 +209,9 @@ impl App {
                     if Arc::strong_count(&b) == 1 {
                         return; // the app let go of the board
                     }
-                    std::thread::sleep(Duration::from_millis(100));
+                    // 30 a second, for the level bars (reads are served
+                    // while the stream is held back: measured in stage 3.0).
+                    std::thread::sleep(Duration::from_millis(33));
                 });
             }
             Err(e) => {
@@ -573,6 +580,7 @@ impl App {
             }
         });
         ui.add_space(10.0);
+        self.levels(ui, st.as_ref());
         ui.add_enabled_ui(self.settings.eq_on, |ui| {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
@@ -605,6 +613,89 @@ impl App {
             });
         });
         ui.small("Double-click a slider for 0 dB. Boosts never clip: the rest is turned down instead (raise the volume on the board).");
+    }
+
+    /// Live band levels (stage 3): bars in dBFS, -60..0, each with a peak
+    /// marker that holds for a second and then falls 30 dB/s.
+    fn levels(&mut self, ui: &mut egui::Ui, st: Option<&Mp3Status>) {
+        const FLOOR: f64 = -60.0;
+        let live = st.filter(|s| !s.idle || s.samples > 0);
+        let now = Instant::now();
+        let dt = now.duration_since(self.peaks_at).as_secs_f64();
+        self.peaks_at = now;
+        let (w, h) = (ui.available_width().min(640.0), 170.0);
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::hover());
+        let p = ui.painter_at(rect);
+        let vis = ui.visuals();
+        p.rect_filled(rect, 4.0, vis.extreme_bg_color);
+        let plot = egui::Rect::from_min_max(
+            rect.min + egui::vec2(34.0, 8.0),
+            rect.max - egui::vec2(8.0, 22.0),
+        );
+        let y_of = |db: f64| {
+            plot.bottom() - ((db - FLOOR) / -FLOOR).clamp(0.0, 1.0) as f32 * plot.height()
+        };
+        for db in [0.0, -12.0, -24.0, -36.0, -48.0, -60.0] {
+            let y = y_of(db);
+            p.line_segment(
+                [egui::pos2(plot.left(), y), egui::pos2(plot.right(), y)],
+                egui::Stroke::new(1.0, vis.faint_bg_color),
+            );
+            p.text(
+                egui::pos2(rect.left() + 4.0, y),
+                egui::Align2::LEFT_CENTER,
+                format!("{db:.0}"),
+                egui::FontId::proportional(10.0),
+                vis.weak_text_color(),
+            );
+        }
+        let slot = plot.width() / 10.0;
+        for b in 0..10 {
+            let x0 = plot.left() + slot * b as f32 + slot * 0.18;
+            let x1 = plot.left() + slot * (b + 1) as f32 - slot * 0.18;
+            let db = live.map_or(FLOOR, |s| s.level_db(b).max(FLOOR));
+            let (pk, t) = &mut self.peaks[b];
+            if db >= *pk {
+                *pk = db;
+                *t = now;
+            } else if now.duration_since(*t) > Duration::from_secs(1) {
+                *pk = (*pk - 30.0 * dt).max(db);
+            }
+            let top = y_of(db);
+            // Green up to -12, amber to -3, red above.
+            let c = if db > -3.0 {
+                Color32::from_rgb(230, 80, 60)
+            } else if db > -12.0 {
+                Color32::from_rgb(230, 180, 60)
+            } else {
+                Color32::from_rgb(70, 190, 110)
+            };
+            if top < plot.bottom() {
+                p.rect_filled(
+                    egui::Rect::from_min_max(egui::pos2(x0, top), egui::pos2(x1, plot.bottom())),
+                    2.0,
+                    c,
+                );
+            }
+            let py = y_of(*pk);
+            if *pk > FLOOR {
+                p.line_segment(
+                    [egui::pos2(x0, py), egui::pos2(x1, py)],
+                    egui::Stroke::new(2.0, vis.strong_text_color()),
+                );
+            }
+            p.text(
+                egui::pos2((x0 + x1) / 2.0, rect.bottom() - 11.0),
+                egui::Align2::CENTER_CENTER,
+                BAND_NAMES[b],
+                egui::FontId::proportional(11.0),
+                vis.text_color(),
+            );
+        }
+        if live.is_some() {
+            ui.ctx().request_repaint_after(Duration::from_millis(33));
+        }
+        ui.add_space(10.0);
     }
 
     fn status_bar(&mut self, ui: &mut egui::Ui) {

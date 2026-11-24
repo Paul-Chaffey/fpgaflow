@@ -500,6 +500,38 @@ pub fn eq_sv() -> String {
         s,
         "            default: c = '0;\n        endcase\nendmodule"
     );
+    // Stage 3: the analyser's band-passes.
+    let _ = writeln!(
+        s,
+        "\n// Analyser band-pass coefficients (eq::bpf_coefs): band 0..9 = 31 Hz..16 kHz,"
+    );
+    let _ = writeln!(s, "// Q 2, MAC form, Q2.23; zero above 0.45 fs.");
+    let _ = writeln!(
+        s,
+        "module eq_bpf_coef (\n    input  logic [1:0] rate,\n    input  logic [3:0] band,\n    input  logic [2:0] k,\n    output logic signed [{}:0] c\n);",
+        COEF_BITS - 1
+    );
+    let _ = writeln!(
+        s,
+        "    always_comb\n        (* rom_style = \"logic\" *)\n        case ({{rate, band, k}})"
+    );
+    for rate in 0..3usize {
+        for band in 0..10usize {
+            for (k, v) in crate::eq::bpf_coefs(rate, band).iter().enumerate() {
+                if *v != 0 {
+                    let _ = writeln!(
+                        s,
+                        "            9'b{rate:02b}_{band:04b}_{k:03b}: c = {COEF_BITS}'sh{:07x};",
+                        (*v as u64) & mask
+                    );
+                }
+            }
+        }
+    }
+    let _ = writeln!(
+        s,
+        "            default: c = '0;\n        endcase\nendmodule"
+    );
     s
 }
 

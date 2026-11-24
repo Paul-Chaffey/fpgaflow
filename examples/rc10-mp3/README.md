@@ -169,3 +169,39 @@ Coefficients for the 3 rates x 4 levels come from `mp3model rtl-tables`
 target/release/mp3model eq-vectors examples/rc10-mp3/build/eq-vectors.txt
 fpgaflow -C examples/rc10-mp3 sim --tb tb_eq    # 63000 samples, bit-exact
 ```
+
+## Graphic equaliser, settings over USB, the RC10 Player (stages 2-3)
+
+With the EQ on, `rtl/eq.sv` runs 10 octave peaking sections (31 Hz-16 kHz,
++-12 dB, Q sqrt 2) after the bass shelf, per channel, on the same MAC (about
+220 of the 1000 clocks a sample). The host computes the coefficients
+(`crates/mp3model/src/eq.rs`, automatic headroom: the combined response never
+rises above 0 dB) and sends them as a set; the FPGA keeps two banks in LUT RAM
+and swaps between samples.
+
+From status "M6" the USB stream is a sequence of records (`rtl/stream_demux.sv`):
+`[type, len_hi, len_lo, payload]` with 0 = MP3 bytes, 1 = EQ coefficients
+(200 bytes), 2 = bass level, 3 = pause, 4 = EQ off. The host sends the song in
+2 KB records and slips settings in between, so a change takes effect within
+about 0.1-0.2 s. Paused by the host, the FPGA lets go of FULL (and the stream
+doesn't time out) so that the record that resumes can get in.
+
+Stage 3: after each sample the same engine runs 10 band-passes (Q 2) on the
+mono sum, each with a peak envelope (instant attack, about 190 ms release);
+every 256 samples the levels go to status bytes 68-87. The host reads the
+status 30 times a second while it streams (reads are served while the stream
+is held back by FULL: measured, 0.3 ms typical).
+
+```sh
+fpgaflow-celoxica eq-play song.aiff --eq 6,4,2,0,-3,-3,0,2,3,4 --bass 1 --levels
+fpgaflow -C examples/rc10-mp3 sim --tb tb_eq      # EQ + analyser vs the model
+```
+
+`fpgaflow-player` ("RC10 Player" in the menu, installed by
+`scripts/install-desktop.sh`) lists the audio files under ~/Music (anything
+that isn't MPEG-1 Layer III is converted by ffmpeg as it streams), plays them
+with play/pause/stop/next, and has a bass-boost button, the 10 EQ sliders with
+presets and the live band levels.
+
+Size with everything: about 10.2k slices (76%), 31 block RAMs, 18 multipliers;
+48 MHz with 0.75 ns and the DAC clock with 0.9 ns to spare.

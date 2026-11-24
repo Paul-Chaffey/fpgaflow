@@ -79,12 +79,22 @@ pub struct Mp3Status {
     pub host_paused: bool,
     pub eq_on: bool,
     pub eq_bank: bool,
+    /// Band levels 31 Hz..16 kHz: peak envelopes in sample units (32768 =
+    /// full scale), and the snapshot counter (wrapping). Zero before stage 3.
+    pub levels: [u16; 10],
+    pub level_snaps: u8,
 }
 
 impl Mp3Status {
     /// Whether the stream must be sent as records.
     pub fn framed(&self) -> bool {
         self.version >= 6
+    }
+    /// A band's level in dBFS (peak), floored at -90.
+    pub fn level_db(&self, band: usize) -> f64 {
+        20.0 * (self.levels[band].max(1) as f64 / 32768.0)
+            .log10()
+            .max(-4.5)
     }
     /// The DACs' sample rate in Hz.
     pub fn rate_hz(&self) -> u32 {
@@ -141,6 +151,14 @@ impl Board {
             host_paused: m6 && s[66] & 4 != 0,
             eq_on: m6 && s[66] & 2 != 0,
             eq_bank: m6 && s[66] & 1 != 0,
+            levels: std::array::from_fn(|b| {
+                if m6 {
+                    u16::from_le_bytes([s[68 + 2 * b], s[69 + 2 * b]])
+                } else {
+                    0
+                }
+            }),
+            level_snaps: if m6 { s[88] } else { 0 },
         })
     }
 

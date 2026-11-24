@@ -43,7 +43,11 @@
 //   64    EQ coefficient sets taken (wrapping)
 //   65    other settings records taken (bass, pause, EQ off; wrapping)
 //   66    {5'b0, paused by the host, EQ on, EQ bank in use}
-//   67-127 0
+//   67    0
+//   68-87 band levels, 31 Hz..16 kHz (16-bit LE, peak envelope in sample units:
+//         32768 = full scale; rtl/eq.sv's analyser on the mono sum)
+//   88    level snapshots taken (wrapping; about 170 a second)
+//   89-127 0
 // Joystick (as the PCM player): up/down = volume in 3 dB steps, left/right =
 // DAC coding (NRZ/RZ), right = bass boost (rtl/eq.sv: off, +4, +8, +12 dB
 // with automatic headroom), centre = pause. Display: "M" (across both digits) and
@@ -79,6 +83,8 @@ module mp3_top #(
     logic [7:0]   rx_data;
     logic [1023:0] status;
     logic          usb_hold;          // paused by the host (below)
+    logic [159:0]  lvl_s1 = '0;       // the band levels (below)
+    logic [7:0]    snaps_s1 = '0;
     fx2_bus #(.IDLE_BITS(IDLE_BITS), .SB(7)) u_bus (
         .clk, .fx2_ncs, .fx2_nwr, .fx2_seln, .fx2_d,
         .rx_valid, .rx_data, .idle, .hold(full | usb_hold), .status
@@ -193,7 +199,7 @@ module mp3_top #(
     // 32-bit value placed as it is comes out little-endian; the header is
     // reversed so its bytes come out in stream order.
     assign status = {
-        488'd0, {5'd0, usb_hold, eq_on, eq_bank}, settings, eq_sets,
+        312'd0, snaps_s1, lvl_s1, 8'd0, {5'd0, usb_hold, eq_on, eq_bank}, settings, eq_sets,
         8'hC3, {6'd0, arate_s2}, {paused, rz, bass, vol}, pfill, underruns, pcrc, nsamp,
         bcrc, subs, scrc, spectra, gcrc, granules, {idle, full, 6'd0}, fill8, undecodable,
         last_header[7:0], last_header[15:8], last_header[23:16], last_header[31:24],
@@ -263,9 +269,23 @@ module mp3_top #(
     logic re_d = 1'b0;
     always_ff @(posedge aclk) re_d <= re;
     logic signed [15:0] eq_l, eq_r;
+    logic [159:0] levels;
+    logic [7:0]   snaps;
     eq u_eq (.clk(aclk), .start(re_d), .rate(arate), .level(bass_a), .on(eqon_a), .bank(bank_a),
-             .in_l(smp_l), .in_r(smp_r), .out_l(eq_l), .out_r(eq_r), .done(),
-             .wclk(clk), .cw_en, .cw_addr, .cw_data);
+             .in_l(smp_l), .in_r(smp_r), .out_l(eq_l), .out_r(eq_r), .done(), .busy(),
+             .levels, .snaps, .wclk(clk), .cw_en, .cw_addr, .cw_data);
+    // The levels to the 48 MHz side: they change once every 256 samples, so
+    // they are copied once snaps[0] (which toggles with each snapshot) has
+    // come through two flip-flops (bundled data; the copies end in _s1, so
+    // the UCF's synchroniser TIG covers them).
+    logic [2:0]   snapt_s1 = '0;
+    always_ff @(posedge clk) begin
+        snapt_s1 <= {snapt_s1[1:0], snaps[0]};
+        if (snapt_s1[2] ^ snapt_s1[1]) begin
+            lvl_s1 <= levels;
+            snaps_s1 <= snaps;
+        end
+    end
     // Volume (3 dB steps, top step 0.9 of full scale) and the DACs.
     logic [7:0] gain;
     always_comb
