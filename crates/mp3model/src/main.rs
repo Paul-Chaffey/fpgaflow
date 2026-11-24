@@ -350,9 +350,18 @@ fn frontend(input: &str, out: &str) -> Result<()> {
         text.push('\n');
     }
     std::fs::write(format!("{out}.sub.txt"), text)?;
+    // PCM: 16-bit samples, interleaved per frame (2304 per stereo frame).
+    let (pcm, pcrc) = fpgaflow_mp3model::frontend::pcm(sent);
+    let mut text = String::new();
+    for chunk in pcm.chunks(2304) {
+        let vals: Vec<String> = chunk.iter().map(|v| v.to_string()).collect();
+        text.push_str(&vals.join(" "));
+        text.push('\n');
+    }
+    std::fs::write(format!("{out}.pcm.txt"), text)?;
     println!(
         "{input}: {} frames, CRC {:08x}, {} bytes skipped, {} undecodable; {} granules, CRC {:08x}; \
-         {} spectra, CRC {:08x}; {} subbands, CRC {:08x}",
+         {} spectra, CRC {:08x}; {} subbands, CRC {:08x}; {} samples, CRC {:08x}",
         s.frames,
         s.crc,
         s.skipped,
@@ -362,7 +371,9 @@ fn frontend(input: &str, out: &str) -> Result<()> {
         spec.len(),
         scrc,
         subs.len(),
-        bcrc
+        bcrc,
+        pcm.len(),
+        pcrc
     );
     Ok(())
 }
@@ -381,6 +392,10 @@ fn rtl_tables(dir: &str) -> Result<()> {
     std::fs::write(
         format!("{dir}/mp3_imdct_rom.sv"),
         fpgaflow_mp3model::rtl::imdct_sv(),
+    )?;
+    std::fs::write(
+        format!("{dir}/mp3_synth_tables.sv"),
+        fpgaflow_mp3model::rtl::synth_sv(),
     )?;
     let (nodes, _) = fpgaflow_mp3model::rtl::huffman_nodes();
     println!("wrote {p} ({} tree nodes)", nodes.len());

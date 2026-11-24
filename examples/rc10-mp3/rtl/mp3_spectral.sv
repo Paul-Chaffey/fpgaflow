@@ -32,6 +32,8 @@ module mp3_spectral (
     input  logic        spec_ready,   // the next stage can take a channel
     output logic [73:0] spec_ent,     // that channel's side info
     output logic        spec_ch,
+    output logic        spec_mono,
+    output logic [1:0]  spec_rate,    // the frame's sampling-rate index
     output logic [31:0] spectra,
     output logic [31:0] crc
 );
@@ -175,6 +177,8 @@ module mp3_spectral (
     assign ready = st == T_IN && nin == 0;   // (as in mp3_imdct: only before a record)
     assign spec_ent = ent[c];
     assign spec_ch = c;
+    assign spec_mono = mono;
+    assign spec_rate = rate;
 
     logic        got = 1'b0, pend = 1'b0;
     logic signed [8:0]  sh = '0;

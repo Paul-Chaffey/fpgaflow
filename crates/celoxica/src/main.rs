@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use fpgaflow_celoxica::{check_bitstream, Board, Error};
 
-const USAGE: &str = "usage: fpgaflow-celoxica status | load FILE.bit | flash-list | flash-read OUT.tar | flash-write FILE.bit [INDEX] | usb-write FILE | usb-read N [OUT] | play AUDIOFILE | mp3-check FILE.mp3 | --version";
+const USAGE: &str = "usage: fpgaflow-celoxica status | load FILE.bit | flash-list | flash-read OUT.tar | flash-write FILE.bit [INDEX] | usb-write FILE | usb-read N [OUT] | play AUDIOFILE | mp3-play FILE.mp3 | mp3-check FILE.mp3 | --version";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -29,6 +29,7 @@ fn main() -> ExitCode {
         ["usb-write", file] => usb_write(file),
         ["play", file] => play(file),
         ["mp3-check", file] => mp3_check(file),
+        ["mp3-play", file] => mp3_play(file),
         ["usb-read", n] | ["usb-read", n, _] => match n.parse() {
             Ok(n) => usb_read(n, args.get(2).map(String::as_str)),
             Err(_) => {
@@ -209,6 +210,11 @@ fn wait_player(
 fn play(file: &str) -> Result<(), Error> {
     use std::io::Read;
     let b = open()?;
+    // The MP3 decoder (examples/rc10-mp3) takes MP3s as they are.
+    if b.usb_read(2, Duration::from_secs(2))? == b"M5" {
+        drop(b);
+        return play_on_decoder(file);
+    }
     // Wait for any earlier stream to finish playing and end, so this one
     // starts on a sample boundary with fresh counts.
     let s = wait_player(&b, Duration::from_secs(3), |s| s.empty && s.idle)?;
@@ -321,11 +327,22 @@ struct FrontEndStatus {
     spectra_crc: u32,
     subbands: u32,
     subbands_crc: u32,
+    samples: u32,
+    pcm_crc: u32,
+}
+
+/// The player's side of the status (not compared with the model).
+struct Mp3PlayerStatus {
+    underruns: u16,
 }
 
 fn front_end_status(b: &Board) -> Result<FrontEndStatus, Error> {
+    Ok(mp3_status(b)?.0)
+}
+
+fn mp3_status(b: &Board) -> Result<(FrontEndStatus, Mp3PlayerStatus), Error> {
     let s = b.usb_read(64, Duration::from_secs(2))?;
-    if &s[0..2] != b"M4" {
+    if &s[0..2] != b"M5" {
         return Err(Error::Other(
             "the RC10 isn't running the MP3 front end: load \
              examples/rc10-mp3/build/impl/mp3_top.bit first"
@@ -333,7 +350,7 @@ fn front_end_status(b: &Board) -> Result<FrontEndStatus, Error> {
         ));
     }
     let u32_at = |i: usize| u32::from_le_bytes([s[i], s[i + 1], s[i + 2], s[i + 3]]);
-    Ok(FrontEndStatus {
+    let fe = FrontEndStatus {
         rx_bytes: u32_at(2),
         frames: u32_at(6),
         frame_bytes: u32_at(10),
@@ -347,7 +364,111 @@ fn front_end_status(b: &Board) -> Result<FrontEndStatus, Error> {
         spectra_crc: u32_at(38),
         subbands: u32_at(42),
         subbands_crc: u32_at(46),
-    })
+        samples: u32_at(50),
+        pcm_crc: u32_at(54),
+    };
+    let pl = Mp3PlayerStatus {
+        underruns: u16::from_le_bytes([s[58], s[59]]),
+    };
+    Ok((fe, pl))
+}
+
+/// Wait (up to 3 s) for the decoder to finish a previous stream: a new one
+/// needs the front end idle (22 ms without bytes).
+fn wait_idle(b: &Board) -> Result<(), Error> {
+    let start = Instant::now();
+    while !front_end_status(b)?.idle {
+        if start.elapsed() > Duration::from_secs(3) {
+            return Err(Error::Other(
+                "the decoder is still busy with another stream".into(),
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    Ok(())
+}
+
+/// `play` with the MP3 decoder loaded: an MPEG-1 Layer III file goes as it
+/// is; anything else is converted to one by ffmpeg (LAME, 192 kbit/s).
+fn play_on_decoder(file: &str) -> Result<(), Error> {
+    use fpgaflow_mp3model::{find_frames, frontend::strip_id3};
+    let data = std::fs::read(file).map_err(|e| Error::File(file.to_string(), e))?;
+    let body = strip_id3(&data);
+    let in_frames: usize = find_frames(body).iter().map(|(_, h)| h.frame_len()).sum();
+    if in_frames * 10 >= body.len() * 9 {
+        return mp3_play_bytes(file, body);
+    }
+    println!("{file} isn't MPEG-1 Layer III: converting it with ffmpeg");
+    let out = std::process::Command::new("ffmpeg")
+        .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-i", file])
+        .args([
+            "-vn",
+            "-map_metadata",
+            "-1",
+            "-id3v2_version",
+            "0",
+            "-write_xing",
+            "0",
+        ])
+        .args([
+            "-ac",
+            "2",
+            "-ar",
+            "44100",
+            "-codec:a",
+            "libmp3lame",
+            "-b:a",
+            "192k",
+        ])
+        .args(["-f", "mp3", "-"])
+        .output()
+        .map_err(|e| Error::Other(format!("can't run ffmpeg: {e}")))?;
+    if !out.status.success() || out.stdout.is_empty() {
+        return Err(Error::Other(format!(
+            "ffmpeg couldn't convert {file}: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    mp3_play_bytes(file, strip_id3(&out.stdout))
+}
+
+/// Play an MP3 on the RC10's decoder (examples/rc10-mp3).
+fn mp3_play(file: &str) -> Result<(), Error> {
+    use fpgaflow_mp3model::frontend::strip_id3;
+    let data = std::fs::read(file).map_err(|e| Error::File(file.to_string(), e))?;
+    mp3_play_bytes(file, strip_id3(&data))
+}
+
+/// Stream MP3 bytes to the decoder. The FPGA paces the stream: this returns
+/// when the last sample is in the DAC FIFO.
+fn mp3_play_bytes(file: &str, sent: &[u8]) -> Result<(), Error> {
+    let b = open()?;
+    wait_idle(&b)?;
+    println!("playing {file} ({} bytes)", sent.len());
+    let t = Instant::now();
+    b.usb_send(sent)?;
+    // The decoder drains its buffers (well under a second).
+    let mut last = mp3_status(&b)?.0.samples;
+    loop {
+        std::thread::sleep(Duration::from_millis(100));
+        let n = mp3_status(&b)?.0.samples;
+        if n == last {
+            break;
+        }
+        last = n;
+    }
+    let (s, p) = mp3_status(&b)?;
+    b.normal_mode()?;
+    println!(
+        "{} frames, {} samples in {:.1} s; {} undecodable, {} underruns, header {:02x?}",
+        s.frames,
+        s.samples,
+        t.elapsed().as_secs_f64(),
+        s.undecodable,
+        p.underruns,
+        s.last_header
+    );
+    Ok(())
 }
 
 /// Stream an MP3 to the decoder and compare what it found with the model:
@@ -355,24 +476,16 @@ fn front_end_status(b: &Board) -> Result<FrontEndStatus, Error> {
 /// info, undecodable frames (milestone 1); granules and the CRC over their
 /// scale factors and Huffman values (milestone 2).
 fn mp3_check(file: &str) -> Result<(), Error> {
-    use fpgaflow_mp3model::frontend::{granules, records, spectra, strip_id3, subbands};
+    use fpgaflow_mp3model::frontend::{granules, pcm, records, spectra, strip_id3, subbands};
     let data = std::fs::read(file).map_err(|e| Error::File(file.to_string(), e))?;
     let sent = strip_id3(&data);
     let (_, want) = records(sent);
     let (grans, gcrc) = granules(sent);
     let (specs, scrc) = spectra(sent);
     let (subs, bcrc) = subbands(sent);
+    let (pcm16, pcrc) = pcm(sent);
     let b = open()?;
-    // A new stream needs the front end idle (22 ms without bytes).
-    let start = Instant::now();
-    while !front_end_status(&b)?.idle {
-        if start.elapsed() > Duration::from_secs(3) {
-            return Err(Error::Other(
-                "the front end is still busy with another stream".into(),
-            ));
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    wait_idle(&b)?;
     let t = Instant::now();
     b.usb_send(sent)?;
     let secs = t.elapsed().as_secs_f64();
@@ -384,7 +497,8 @@ fn mp3_check(file: &str) -> Result<(), Error> {
             && s.frames == want.frames
             && s.granules == grans.len() as u32
             && s.spectra == specs.len() as u32
-            && s.subbands == subs.len() as u32)
+            && s.subbands == subs.len() as u32
+            && s.samples == pcm16.len() as u32)
             || start.elapsed() > Duration::from_secs(5)
         {
             break s;
@@ -406,11 +520,13 @@ fn mp3_check(file: &str) -> Result<(), Error> {
         spectra_crc: scrc,
         subbands: subs.len() as u32,
         subbands_crc: bcrc,
+        samples: pcm16.len() as u32,
+        pcm_crc: pcrc,
     };
     let show = |s: &FrontEndStatus| {
         format!(
             "{} frames, {} bytes in frames, CRC {:08x}, {} undecodable, last header {:02x?}; \
-             {} granules, CRC {:08x}; {} spectra, CRC {:08x}; {} subbands, CRC {:08x}",
+             {} granules, CRC {:08x}; {} spectra, CRC {:08x}; {} subbands, CRC {:08x}; {} samples, CRC {:08x}",
             s.frames,
             s.frame_bytes,
             s.crc,
@@ -421,7 +537,9 @@ fn mp3_check(file: &str) -> Result<(), Error> {
             s.spectra,
             s.spectra_crc,
             s.subbands,
-            s.subbands_crc
+            s.subbands_crc,
+            s.samples,
+            s.pcm_crc
         )
     };
     println!(

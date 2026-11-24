@@ -19,9 +19,15 @@ module mp3_imdct (
     input  logic [7:0]  in_data,
     input  logic [73:0] in_ent,       // the channel's side info (block type)
     input  logic        in_ch,
+    input  logic        in_mono,
+    input  logic [1:0]  in_rate,
     output logic        ready,
     output logic        sub_valid,
     output logic [7:0]  sub_data,
+    input  logic        sub_ready,    // the next stage can take a channel
+    output logic        sub_ch,
+    output logic        sub_mono,
+    output logic [1:0]  sub_rate,
     output logic [31:0] subbands,
     output logic [31:0] crc
 );
@@ -79,7 +85,11 @@ module mp3_imdct (
 
     // ------------------------------------------------------------ channel
     logic [73:0] ent = '0;
-    logic        ch = 1'b0;
+    logic        ch = 1'b0, mono = 1'b0;
+    assign sub_ch = ch;
+    assign sub_mono = mono;
+    logic [1:0]  rate = '0;
+    assign sub_rate = rate;
     wire         ws = ent[40], mix = ent[39];
     wire  [1:0]  bt = ent[38:37];
     logic [4:0]  sb = '0;
@@ -171,6 +181,8 @@ module mp3_imdct (
                     if (nin == 0) begin
                         ent <= in_ent;
                         ch <= in_ch;
+                        mono <= in_mono;
+                        rate <= in_rate;
                     end
                     if (nin[1:0] != 2'd3) begin
                         part <= {in_data, part[23:8]};
@@ -187,11 +199,11 @@ module mp3_imdct (
                     end
                 end
             // ---- a subband: clear z for short blocks, then the MACs
-            I_SB: begin
+            I_SB: begin                        // (a channel starts when the next stage is ready)
                 t <= '0;
                 oi <= '0;
                 win <= '0;
-                st <= short_sb ? I_ZCLR : I_OUT;
+                if (sb != 0 || sub_ready) st <= short_sb ? I_ZCLR : I_OUT;
             end
             I_ZCLR: begin
                 t <= t + 1'b1;

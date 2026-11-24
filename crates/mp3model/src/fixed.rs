@@ -133,6 +133,12 @@ pub fn coef_tables(f: &Fmt) -> ([i64; 8], [i64; 8], i64, [(i64, i64); 7]) {
     (k.aa_cs, k.aa_ca, k.ms, k.is_k)
 }
 
+/// The synthesis matrix N[i][k] (64 x 32, row-major) in format `f`, as the
+/// back end uses it.
+pub fn synth_matrix(f: &Fmt) -> Vec<i64> {
+    Coefs::new(f).synth_n
+}
+
 /// IMDCT coefficients (cosine x window) in format `f`, as the back end uses
 /// them: long blocks [block type][i][k] (types 0, 1, 3) and the short block's
 /// [i][k].

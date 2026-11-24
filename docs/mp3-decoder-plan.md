@@ -180,6 +180,10 @@ MHz and the DCMs) or resampling; that is decided in milestone 6.
 | 5 | Polyphase synthesis into the PCM FIFO and DACs: **first music decoded on the FPGA** | bit-exact sim; PCM CRCs; listening |
 | 6 | Robustness and finish: resync after errors and ID3 tags; `fpgaflow-celoxica play` sends MP3s raw; timing closure; README; optionally MPEG-2 LSF | long real-music runs with zero CRC mismatches |
 
+**Status 2026-11-24:** milestones 0-5 done: the 18 vector streams decode
+bit-exact on the board (PCM CRCs), at 32, 44.1 and 48 kHz (the DAC clock is a
+BUFGMUX of clock A and the 48 MHz, chosen per stream). `play` sends MP3s raw.
+
 ## Risks
 
 - **Huffman and side-info control.** This is the most bug-prone part. It is

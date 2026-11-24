@@ -10,8 +10,10 @@ model=$root/target/release/mp3model
 mkdir -p "$out"
 : > "$out/list.txt"
 add() {  # NAME FILE
+    # The summary: frames, CRC, granules, CRC, spectra, CRC, subbands, CRC, samples, CRC.
     "$model" frontend "$2" "$out/$1" \
-        | sed -E 's/.*: ([0-9]+) frames, CRC ([0-9a-f]+),.*; ([0-9]+) granules, CRC ([0-9a-f]+); ([0-9]+) spectra, CRC ([0-9a-f]+); ([0-9]+) subbands, CRC ([0-9a-f]+)/\1 \2 \3 \4 \5 \6 \7 \8/' > "$out/$1.sum"
+        | grep -oE '[0-9]+ (frames|granules|spectra|subbands|samples), CRC [0-9a-f]+' \
+        | awk '{printf "%s %s ", $1, $4} END {print ""}' > "$out/$1.sum"
     echo "$1" >> "$out/list.txt"
 }
 for n in compl he_32khz he_44khz he_48khz he_mode hecommon si si_block si_huff sin1k0db; do

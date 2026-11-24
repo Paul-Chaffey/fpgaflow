@@ -20,7 +20,8 @@ module fx2_bus #(
     inout  wire  [7:0]   fx2_d,
     output logic         rx_valid,        // a byte from the host this cycle
     output logic [7:0]   rx_data,
-    output logic         idle,            // no byte for 2^IDLE_BITS cycles
+    output logic         idle,            // no byte for 2^IDLE_BITS cycles (not counting
+    input  logic         hold,            // cycles with hold high: the host is waiting on us)
     input  logic [8*(1<<SB)-1:0] status
 );
     logic       ncs_q = 1'b1, ncs_q2 = 1'b1, nwr_q = 1'b1;
@@ -38,7 +39,7 @@ module fx2_bus #(
 
     logic [IDLE_BITS:0] quiet = {1'b1, {IDLE_BITS{1'b0}}};   // idle at power-up
     always_ff @(posedge clk)
-        if (rx_valid) quiet <= '0;
+        if (rx_valid || hold) quiet <= '0;
         else if (!quiet[IDLE_BITS]) quiet <= quiet + 1'b1;
     assign idle = quiet[IDLE_BITS];
 

@@ -1,6 +1,6 @@
 `timescale 1ns/1ps
 
-// The decoder so far (mp3_frontend + mp3_granule) against mp3model: every
+// The whole decoder (front end to PCM) against mp3model: every
 // stream in build/vectors/list.txt (made by tools/make-vectors.sh) is fed in
 // with random gaps, honouring `full` with the FX2's measured 3-byte overrun.
 // Every frame record (70 bytes) and every granule record (61 scale factors
@@ -43,10 +43,41 @@ module tb_decoder;
     mp3_spectral sdut (.clk, .new_stream, .in_valid(g_valid), .in_data(g_data), .in_hdr(rec_hdr),
                        .in_ent(rec_ent), .in_ch(rec_ch), .ready(s_ready),
                        .spec_valid(s_valid), .spec_data(s_data), .spec_ready(i_ready),
-                       .spec_ent, .spec_ch, .spectra, .crc(scrc));
+                       .spec_ent, .spec_ch, .spec_mono, .spec_rate, .spectra, .crc(scrc));
+    logic spec_mono, y_ready, sub_ch, sub_mono, pcm_valid;
+    logic [1:0] spec_rate, sub_rate, pcm_rate;
+    logic [31:0] pcm_word, nsamp, pcrc;
     mp3_imdct idut (.clk, .new_stream, .in_valid(s_valid), .in_data(s_data), .in_ent(spec_ent),
-                    .in_ch(spec_ch), .ready(i_ready), .sub_valid(b_valid), .sub_data(b_data),
+                    .in_ch(spec_ch), .in_mono(spec_mono), .in_rate(spec_rate), .ready(i_ready), .sub_valid(b_valid),
+                    .sub_data(b_data), .sub_ready(y_ready), .sub_ch, .sub_mono, .sub_rate,
                     .subbands(subs), .crc(bcrc));
+    // The FIFO's room: mostly there, sometimes not, to exercise the wait.
+    logic out_room = 1'b1;
+    always @(posedge clk) out_room <= ($urandom % 16) != 0;
+    mp3_synth ydut (.clk, .new_stream, .in_valid(b_valid), .in_data(b_data), .in_ch(sub_ch),
+                    .in_mono(sub_mono), .in_rate(sub_rate), .ready(y_ready), .pcm_valid, .pcm_word, .pcm_rate, .out_room,
+                    .samples(nsamp), .crc(pcrc));
+
+    // PCM (stereo words {right, left}; mono has left = right), against .pcm.txt.
+    integer pfd, pn = 0, perr_shown = 0, want_p;
+    always @(posedge clk) if (pcm_valid) begin
+        void'($fscanf(pfd, "%d", want_p));
+        if ($signed(pcm_word[15:0]) != want_p) begin
+            if (perr_shown < 8) $display("FAIL: PCM sample %0d = %0d, model %0d", pn, $signed(pcm_word[15:0]), want_p);
+            perr_shown = perr_shown + 1;
+            errors = errors + 1;
+        end
+        pn = pn + 1;
+        if (!ydut.mono) begin
+            void'($fscanf(pfd, "%d", want_p));
+            if ($signed(pcm_word[31:16]) != want_p) begin
+                if (perr_shown < 8) $display("FAIL: PCM sample %0d = %0d, model %0d", pn, $signed(pcm_word[31:16]), want_p);
+                perr_shown = perr_shown + 1;
+                errors = errors + 1;
+            end
+            pn = pn + 1;
+        end
+    end
 
     // Subband samples (IMDCT output), against the model's .sub.txt.
     integer bfd, bn = 0, bb = 0, berr_shown = 0, want_b;
@@ -173,9 +204,10 @@ module tb_decoder;
         end
     end
 
-    integer lfd, fd, c, sent, gaps, want_frames, want_grans, want_spec, want_sub, cyc, total_spec = 0, total_sub = 0;
+    integer lfd, fd, c, sent, gaps, want_frames, want_grans, want_spec, want_sub, want_pcm, cyc;
+    integer total_spec = 0, total_sub = 0, total_pcm = 0;
     reg [8*64-1:0] name;
-    reg [31:0] want_crc, want_gcrc, want_scrc, want_bcrc;
+    reg [31:0] want_crc, want_gcrc, want_scrc, want_bcrc, want_pcrc;
     string path;
     initial begin
         lfd = $fopen({DIR, "list.txt"}, "r");
@@ -191,10 +223,12 @@ module tb_decoder;
             gfd = $fopen({DIR, path, ".gran.txt"}, "r");
             sfd = $fopen({DIR, path, ".spec.txt"}, "r");
             bfd = $fopen({DIR, path, ".sub.txt"}, "r");
+            pfd = $fopen({DIR, path, ".pcm.txt"}, "r");
+            pn = 0; perr_shown = 0;
             gn = 0; gb = 0; gerr_shown = 0; sn = 0; sb_ = 0; serr_shown = 0; bn = 0; bb = 0; berr_shown = 0;
             c   = $fopen({DIR, path, ".sum"}, "r");
-            void'($fscanf(c, "%d %h %d %h %d %h %d %h", want_frames, want_crc, want_grans, want_gcrc,
-                          want_spec, want_scrc, want_sub, want_bcrc));
+            void'($fscanf(c, "%d %h %d %h %d %h %d %h %d %h", want_frames, want_crc, want_grans, want_gcrc,
+                          want_spec, want_scrc, want_sub, want_bcrc, want_pcm, want_pcrc));
             $fclose(c);
             nrec = 0; nbyte = 0; sent = 0;
             idle = 0;
@@ -220,22 +254,25 @@ module tb_decoder;
             while (frames < want_frames && cyc < 400000) begin @(posedge clk); cyc = cyc + 1; end
             idle = 1;
             cyc = 0;
-            while ((granules < want_grans || spectra < want_spec || subs < want_sub) && cyc < 4000000) begin @(posedge clk); cyc = cyc + 1; end
+            while ((granules < want_grans || spectra < want_spec || subs < want_sub || nsamp < want_pcm) && cyc < 8000000) begin @(posedge clk); cyc = cyc + 1; end
             repeat (20000) @(posedge clk);
             if (frames !== want_frames || crc !== want_crc || nrec != want_frames
                 || granules !== want_grans || gcrc !== want_gcrc || spectra !== want_spec || scrc !== want_scrc
-                || subs !== want_sub || bcrc !== want_bcrc) begin
+                || subs !== want_sub || bcrc !== want_bcrc || nsamp !== want_pcm || pcrc !== want_pcrc) begin
                 $display("FAIL: %0s: %0d frames (model %0d), CRC %h (model %h); %0d granules (model %0d), CRC %h (model %h); %0d spectra (model %0d), CRC %h (model %h)",
                          path, frames, want_frames, crc, want_crc, granules, want_grans, gcrc, want_gcrc,
                          spectra, want_spec, scrc, want_scrc);
-                $display("FAIL:   subbands %0d (model %0d), CRC %h (model %h)", subs, want_sub, bcrc, want_bcrc);
+                $display("FAIL:   subbands %0d (model %0d), CRC %h (model %h); %0d samples (model %0d), CRC %h (model %h)",
+                         subs, want_sub, bcrc, want_bcrc, nsamp, want_pcm, pcrc, want_pcrc);
                 errors = errors + 1;
             end else begin
-                $display("  %0s: %0d frames, %0d granules, %0d spectra, %0d subbands, CRCs %h %h %h %h: match the model",
-                         path, frames, granules, spectra, subs, crc, gcrc, scrc, bcrc);
+                $display("  %0s: %0d frames, %0d granules, %0d spectra, %0d subbands, %0d samples, CRCs %h %h %h %h %h: match the model",
+                         path, frames, granules, spectra, subs, nsamp, crc, gcrc, scrc, bcrc, pcrc);
             end
             total_spec = total_spec + spectra;
             total_sub = total_sub + subs;
+            total_pcm = total_pcm + nsamp;
+            $fclose(pfd);
             $fclose(bfd);
             $fclose(gfd);
             $fclose(sfd);
@@ -243,8 +280,8 @@ module tb_decoder;
             total_grans = total_grans + granules;
             $fclose(mfd);
         end
-        if (errors == 0) $display("PASS: %0d frames, %0d granules, %0d spectra and %0d subband sets in all streams match the model",
-                                  total_frames, total_grans, total_spec, total_sub);
+        if (errors == 0) $display("PASS: %0d frames, %0d granules, %0d spectra, %0d subband sets and %0d PCM samples in all streams match the model",
+                                  total_frames, total_grans, total_spec, total_sub, total_pcm);
         else $display("FAIL: %0d errors", errors);
         $finish;
     end

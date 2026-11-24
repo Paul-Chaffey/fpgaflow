@@ -42,3 +42,28 @@ NET "seg1<4>" LOC = "C1" | IOSTANDARD = LVCMOS25 ;   # e
 NET "seg1<5>" LOC = "H4" | IOSTANDARD = LVCMOS25 ;   # f
 NET "seg1<6>" LOC = "B1" | IOSTANDARD = LVCMOS25 ;   # g
 NET "seg1<7>" LOC = "J4" | IOSTANDARD = LVCMOS25 ;   # dp
+# Joystick and audio (as in rc10-pcm-player)
+NET "joy<4>" LOC = "B10" | IOSTANDARD = LVCMOS33 ;   # JOY_SELECT
+NET "joy<3>" LOC = "A11" | IOSTANDARD = LVCMOS33 ;   # JOY_DOWN
+NET "joy<2>" LOC = "B13" | IOSTANDARD = LVCMOS33 ;   # JOY_UP
+NET "joy<1>" LOC = "D10" | IOSTANDARD = LVCMOS33 ;   # JOY_RIGHT
+NET "joy<0>" LOC = "A10" | IOSTANDARD = LVCMOS33 ;   # JOY_LEFT
+NET "audio_l" LOC = "U4" | IOSTANDARD = LVCMOS33 ;
+NET "audio_r" LOC = "V5" | IOSTANDARD = LVCMOS33 ;
+NET "piezo<0>" LOC = "U6" | IOSTANDARD = LVCMOS33 ;
+NET "piezo<1>" LOC = "V7" | IOSTANDARD = LVCMOS33 ;
+# Clock-domain crossings: paths into the first synchroniser flip-flops
+# (names ending _s1) go between the 48 MHz and DAC clocks and are not timed.
+INST "*_s1*" TNM = "SYNC_FIRST";
+TIMESPEC "TS_sync" = TO "SYNC_FIRST" TIG;
+# The DAC clock is a BUFGMUX of clock A (44.1 MHz, from the DCMs) and the
+# 48 MHz. ISE treats the two as related and times DAC paths launched on one
+# and captured on the other (a 0.14 ns phase step), which only a switch
+# could do. A FROM-TO (it outranks the derived PERIOD) gives every path in
+# the DAC domain the plain 48 MHz requirement instead: right for either.
+NET "u_aclk.aclk" TNM_NET = "TN_dac";
+TIMESPEC "TS_dac" = FROM "TN_dac" TO "TN_dac" 20.833 ns;
+# The BUFGMUX select may change at any time (the mux switches when it is
+# safe); it changes once per stream rate, with reads held off.
+INST "use48_q*" TNM = "TN_sel";
+TIMESPEC "TS_sel" = FROM "TN_sel" TIG;

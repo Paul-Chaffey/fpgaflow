@@ -265,3 +265,22 @@ pub fn subbands(data: &[u8]) -> (Vec<[i64; 576]>, u32) {
     }
     (out, crc.value())
 }
+
+/// The 16-bit PCM of every decodable frame (milestone 5), interleaved per
+/// frame as the frame's channels come (one value per sample for mono), with
+/// the CRC-32 over each value as 16-bit little-endian.
+pub fn pcm(data: &[u8]) -> (Vec<i16>, u32) {
+    let mut d = crate::Decoder::default();
+    let mut fx = crate::fixed::FixedBackend::new(HW);
+    let mut out = Vec::new();
+    for (pos, h) in find_frames(data) {
+        if let Some(f) = d.decode_frame(&data[pos..pos + h.frame_len()]) {
+            out.extend(fx.decode(&f).1);
+        }
+    }
+    let mut crc = Crc32::default();
+    for v in &out {
+        crc.update(&v.to_le_bytes());
+    }
+    (out, crc.value())
+}
