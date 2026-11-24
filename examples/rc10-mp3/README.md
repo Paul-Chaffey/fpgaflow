@@ -18,8 +18,10 @@ LAME to 192 kbit/s MPEG-1 at 44.1 kHz on the way. The decoder resynchronises
 after damage: a header counts only when the next one follows where its
 length says.
 
-Joystick: up/down = volume (16 steps of 3 dB, shown on the display), left/
-right = DAC coding (NRZ or return-to-zero, LED 1), centre = pause (the dot).
+Joystick: up/down = volume (16 steps of 3 dB, shown on the display for 3 s),
+left/right = DAC coding (NRZ or return-to-zero, LED 1), centre = pause (the
+dot). Otherwise the display shows "M" (drawn across both digits) and "P3" by
+turns, a second each.
 
 The decoder is bit-exact with the fixed-point model in `crates/mp3model`
 (26-bit data, 18-bit coefficients: ISO 11172-4 "full accuracy" on all the

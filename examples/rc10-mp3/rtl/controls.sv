@@ -11,12 +11,14 @@ module controls #(
     input  logic [4:0] joy,            // {select, down, up, right, left}
     output logic [3:0] vol,
     output logic       paused,
-    output logic       rz              // DAC coding: 1 = return to zero
+    output logic       rz,             // DAC coding: 1 = return to zero
+    output logic       vol_key         // a pulse per up or down press (even at a limit)
 );
     logic [$clog2(MS)-1:0] div = '0;
     logic [4:0] s1 = '0, s2 = '0, held = '0;
     logic [3:0] v = VOL0;
     logic       p = 1'b0, z = 1'b1;
+    initial vol_key = 1'b0;
     wire  [4:0] press = s1 & s2 & ~held;
     always_ff @(posedge clk) begin
         div <= (div == $clog2(MS)'(MS - 1)) ? '0 : div + 1'b1;
@@ -29,6 +31,7 @@ module controls #(
             if (press[1] | press[0]) z <= ~z;
             if (press[4]) p <= ~p;
         end
+        vol_key <= div == '0 && (press[2] || press[3]);
     end
     assign vol = v;
     assign paused = p;

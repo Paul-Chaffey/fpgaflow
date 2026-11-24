@@ -41,7 +41,8 @@
 //   62    rate the DACs play at: 0 = 44.1, 1 = 48, 2 = 32 kHz
 //   63    C3
 // Joystick (as the PCM player): up/down = volume in 3 dB steps, left/right =
-// DAC coding (NRZ/RZ), centre = pause. Display: volume; dot = paused.
+// DAC coding (NRZ/RZ), centre = pause. Display: "M" (across both digits) and
+// "P3" by turns, a second each; the volume for 3 s after up/down; dot = paused.
 // LEDs: 0 = idle, 1 = RZ, 4-7 = input buffer fill.
 module mp3_top #(
     parameter int IDLE_BITS = 20,
@@ -140,7 +141,8 @@ module mp3_top #(
     // ---- Controls, and playback events from the audio side
     logic [3:0] vol;
     logic       paused, rz;
-    controls #(.MS(MS), .VOL0(VOL0)) u_ctl (.clk, .joy, .vol, .paused, .rz);
+    logic       vol_key;
+    controls #(.MS(MS), .VOL0(VOL0)) u_ctl (.clk, .joy, .vol, .paused, .rz, .vol_key);
     logic t_resume;                             // audio side: toggles
     logic [2:0] resume_s1 = '0;
     always_ff @(posedge clk) resume_s1 <= {resume_s1[1:0], t_resume};
@@ -174,16 +176,8 @@ module mp3_top #(
     };
 
     // ---- Display and LEDs
-    function automatic logic [7:0] digit(input logic [3:0] v);
-        case (v)
-            4'd0: digit = 8'h3F; 4'd1: digit = 8'h06; 4'd2: digit = 8'h5B; 4'd3: digit = 8'h4F;
-            4'd4: digit = 8'h66; 4'd5: digit = 8'h6D; 4'd6: digit = 8'h7D; 4'd7: digit = 8'h07;
-            4'd8: digit = 8'h7F; default: digit = 8'h6F;
-        endcase
-    endfunction
+    display #(.MS(MS)) u_disp (.clk, .vol_key, .vol, .paused, .seg0, .seg1);
     always_ff @(posedge clk) begin
-        seg0 <= (vol >= 4'd10) ? digit(4'd1) : 8'h00;
-        seg1 <= digit((vol >= 4'd10) ? vol - 4'd10 : vol) | {paused, 7'b0};
         led[0] <= idle;
         led[1] <= rz;
         led[3:2] <= '0;
