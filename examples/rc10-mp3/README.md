@@ -186,9 +186,10 @@ From status "M6" the USB stream is a sequence of records (`rtl/stream_demux.sv`)
 about 0.1-0.2 s. Paused by the host, the FPGA lets go of FULL (and the stream
 doesn't time out) so that the record that resumes can get in.
 
-Stage 3: after each sample the same engine runs 10 band-passes (Q 2) on the
-mono sum, each with a peak envelope (instant attack, about 190 ms release);
-every 256 samples the levels go to status bytes 68-87. The host reads the
+Stage 3: after each sample the same engine runs 10 band-passes (Q 2) on each
+output channel, each with a peak envelope (instant attack, about 190 ms
+release); every 256 samples the 20 levels go to status bytes 68-107 (left
+then right). The host reads the
 status 30 times a second while it streams (reads are served while the stream
 is held back by FULL: measured, 0.3 ms typical).
 
@@ -200,8 +201,9 @@ fpgaflow -C examples/rc10-mp3 sim --tb tb_eq      # EQ + analyser vs the model
 `fpgaflow-player` ("RC10 Player" in the menu, installed by
 `scripts/install-desktop.sh`) lists the audio files under ~/Music (anything
 that isn't MPEG-1 Layer III is converted by ffmpeg as it streams), plays them
-with play/pause/stop/next, and has a bass-boost button, the 10 EQ sliders with
-presets and the live band levels.
+with play/pause/stop/next and a position slider, and has a bass-boost button,
+the 10 EQ sliders with presets and the live band levels as an LED meter (a
+left and a right column of green/amber/red segments per band).
 
-Size with everything: about 10.2k slices (76%), 31 block RAMs, 18 multipliers;
-48 MHz with 0.75 ns and the DAC clock with 0.9 ns to spare.
+Size with everything: about 10k slices (74%), 31 block RAMs, 18 multipliers;
+48 MHz with 0.3 ns and the DAC clock with 1.5 ns to spare.

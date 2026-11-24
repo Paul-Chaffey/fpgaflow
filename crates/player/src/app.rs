@@ -107,7 +107,7 @@ pub struct App {
     eq_dirty: bool,
     eq_sent: Instant,
     /// Level bars' peak markers: dB and when each was set.
-    peaks: [(f64, Instant); 10],
+    peaks: [[(f64, Instant); 10]; 2],
     peaks_at: Instant,
     message: Option<(bool, String)>,
     ctx: egui::Context,
@@ -145,7 +145,7 @@ impl App {
             msg_rx,
             eq_dirty: false,
             eq_sent: Instant::now(),
-            peaks: [(-60.0, Instant::now()); 10],
+            peaks: [[(-60.0, Instant::now()); 10]; 2],
             peaks_at: Instant::now(),
             message: None,
             ctx: cc.egui_ctx.clone(),
@@ -689,83 +689,93 @@ impl App {
         ui.small("Double-click a slider for 0 dB. Boosts never clip: the rest is turned down instead (raise the volume on the board).");
     }
 
-    /// Live band levels (stage 3): bars in dBFS, -60..0, each with a peak
-    /// marker that holds for a second and then falls 30 dB/s.
+    /// Live band levels (stage 3), as a classic LED meter: per band a left
+    /// and a right column of segments, -60..0 dBFS in 2.5 dB steps, green up
+    /// to -12 dB, amber to -3 dB, red above; unlit segments glow dimly, and a
+    /// peak segment holds for a second, then falls 30 dB/s.
+    #[allow(clippy::needless_range_loop)] // (c indexes the status and the peaks)
     fn levels(&mut self, ui: &mut egui::Ui, st: Option<&Mp3Status>) {
         const FLOOR: f64 = -60.0;
+        const SEGS: usize = 24;
+        const STEP: f64 = -FLOOR / SEGS as f64;
         let live = st.filter(|s| !s.idle || s.samples > 0);
         let now = Instant::now();
         let dt = now.duration_since(self.peaks_at).as_secs_f64();
         self.peaks_at = now;
-        let (w, h) = (ui.available_width().min(640.0), 170.0);
+        let (w, h) = (ui.available_width().min(680.0), 200.0);
         let (rect, _) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::hover());
         let p = ui.painter_at(rect);
-        let vis = ui.visuals();
-        p.rect_filled(rect, 4.0, vis.extreme_bg_color);
+        p.rect_filled(rect, 6.0, Color32::from_rgb(16, 18, 26));
         let plot = egui::Rect::from_min_max(
-            rect.min + egui::vec2(34.0, 8.0),
-            rect.max - egui::vec2(8.0, 22.0),
+            rect.min + egui::vec2(36.0, 12.0),
+            rect.max - egui::vec2(10.0, 26.0),
         );
-        let y_of = |db: f64| {
-            plot.bottom() - ((db - FLOOR) / -FLOOR).clamp(0.0, 1.0) as f32 * plot.height()
-        };
+        let label = Color32::from_rgb(150, 160, 180);
+        let seg_h = plot.height() / SEGS as f32;
         for db in [0.0, -12.0, -24.0, -36.0, -48.0, -60.0] {
-            let y = y_of(db);
-            p.line_segment(
-                [egui::pos2(plot.left(), y), egui::pos2(plot.right(), y)],
-                egui::Stroke::new(1.0, vis.faint_bg_color),
-            );
+            let y = plot.bottom() - ((db - FLOOR) / -FLOOR) as f32 * plot.height();
             p.text(
-                egui::pos2(rect.left() + 4.0, y),
+                egui::pos2(rect.left() + 6.0, y),
                 egui::Align2::LEFT_CENTER,
                 format!("{db:.0}"),
                 egui::FontId::proportional(10.0),
-                vis.weak_text_color(),
+                label,
             );
         }
-        let slot = plot.width() / 10.0;
-        for b in 0..10 {
-            let x0 = plot.left() + slot * b as f32 + slot * 0.18;
-            let x1 = plot.left() + slot * (b + 1) as f32 - slot * 0.18;
-            let db = live.map_or(FLOOR, |s| s.level_db(b).max(FLOOR));
-            let (pk, t) = &mut self.peaks[b];
-            if db >= *pk {
-                *pk = db;
-                *t = now;
-            } else if now.duration_since(*t) > Duration::from_secs(1) {
-                *pk = (*pk - 30.0 * dt).max(db);
-            }
-            let top = y_of(db);
-            // Green up to -12, amber to -3, red above.
-            let c = if db > -3.0 {
-                Color32::from_rgb(230, 80, 60)
-            } else if db > -12.0 {
-                Color32::from_rgb(230, 180, 60)
+        let colour = |top_db: f64| {
+            if top_db > -3.0 {
+                Color32::from_rgb(255, 64, 48)
+            } else if top_db > -12.0 {
+                Color32::from_rgb(255, 184, 32)
             } else {
-                Color32::from_rgb(70, 190, 110)
-            };
-            if top < plot.bottom() {
-                p.rect_filled(
-                    egui::Rect::from_min_max(egui::pos2(x0, top), egui::pos2(x1, plot.bottom())),
-                    2.0,
-                    c,
-                );
+                Color32::from_rgb(48, 220, 96)
             }
-            let py = y_of(*pk);
-            if *pk > FLOOR {
-                p.line_segment(
-                    [egui::pos2(x0, py), egui::pos2(x1, py)],
-                    egui::Stroke::new(2.0, vis.strong_text_color()),
-                );
+        };
+        let slot = plot.width() / 10.0;
+        let col_w = (slot * 0.78 - 3.0) / 2.0;
+        for b in 0..10 {
+            let left = plot.left() + slot * b as f32 + slot * 0.11;
+            for c in 0..2 {
+                let x0 = left + c as f32 * (col_w + 3.0);
+                let x1 = x0 + col_w;
+                let db = live.map_or(FLOOR, |s| s.level_db(c, b).max(FLOOR));
+                let (pk, t) = &mut self.peaks[c][b];
+                if db >= *pk {
+                    *pk = db;
+                    *t = now;
+                } else if now.duration_since(*t) > Duration::from_secs(1) {
+                    *pk = (*pk - 30.0 * dt).max(db);
+                }
+                let lit = ((db - FLOOR) / STEP).floor() as isize; // segments below this are lit
+                let peak = ((*pk - FLOOR) / STEP).floor() as isize - 1;
+                for i in 0..SEGS {
+                    let y1 = plot.bottom() - seg_h * i as f32;
+                    let y0 = y1 - seg_h + 2.0;
+                    let full = colour(FLOOR + STEP * (i + 1) as f64);
+                    let on = (i as isize) < lit || (i as isize == peak && *pk > FLOOR + STEP);
+                    let fill = if on { full } else { full.gamma_multiply(0.14) };
+                    p.rect_filled(
+                        egui::Rect::from_min_max(egui::pos2(x0, y0), egui::pos2(x1, y1)),
+                        1.5,
+                        fill,
+                    );
+                }
             }
             p.text(
-                egui::pos2((x0 + x1) / 2.0, rect.bottom() - 11.0),
+                egui::pos2(left + col_w + 1.5, rect.bottom() - 13.0),
                 egui::Align2::CENTER_CENTER,
                 BAND_NAMES[b],
                 egui::FontId::proportional(11.0),
-                vis.text_color(),
+                label,
             );
         }
+        p.text(
+            egui::pos2(rect.right() - 8.0, rect.top() + 4.0),
+            egui::Align2::RIGHT_TOP,
+            "L R per band",
+            egui::FontId::proportional(10.0),
+            label,
+        );
         if live.is_some() {
             ui.ctx().request_repaint_after(Duration::from_millis(33));
         }

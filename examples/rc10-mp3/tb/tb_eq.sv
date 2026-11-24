@@ -3,7 +3,7 @@
 // Tone control (rtl/eq.sv) against crates/mp3model/src/eq.rs (`Equalizer`):
 // build/eq-vectors.txt (`mp3model eq-vectors build/eq-vectors.txt`) holds
 //   S rate level in_l in_r out_l out_r   one stereo sample; both outputs must match
-//   L snaps l0 .. l9                     the analyser's snapshot after that sample
+//   L snaps l0 .. l9 r0 .. r9            the analyser's snapshot after that sample
 //   C on c0 .. c49                       from the next sample: EQ on/off and a set
 // A set is written into the bank not in use on the write clock (as the USB
 // side does), then the banks swap. Run with
@@ -15,7 +15,7 @@ module tb_eq;
     always #10.4167 wclk = ~wclk;          // 48 MHz, the USB side
 
     logic start = 0, done, busy, on = 0, bank = 0;
-    logic [159:0] levels;
+    logic [319:0] levels;
     logic [7:0] snaps;
     integer nsnap = 0, ws, wv;
     logic [1:0] rate = '0, level = '0;
@@ -84,7 +84,7 @@ module tb_eq;
                     if (errors < 10) $display("FAIL: after sample %0d: snapshot %0d, model %0d", n - 1, snaps, ws);
                     errors = errors + 1;
                 end
-                for (int b = 0; b < 10; b++) begin
+                for (int b = 0; b < 20; b++) begin   // left 0-9, right 10-19
                     void'($fscanf(fd, "%d", wv));
                     if (levels[16 * b +: 16] != wv[15:0]) begin
                         if (errors < 10) $display("FAIL: after sample %0d: band %0d level %0d, model %0d",

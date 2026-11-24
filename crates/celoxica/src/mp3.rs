@@ -79,9 +79,10 @@ pub struct Mp3Status {
     pub host_paused: bool,
     pub eq_on: bool,
     pub eq_bank: bool,
-    /// Band levels 31 Hz..16 kHz: peak envelopes in sample units (32768 =
-    /// full scale), and the snapshot counter (wrapping). Zero before stage 3.
-    pub levels: [u16; 10],
+    /// Band levels 31 Hz..16 kHz, [left, right]: peak envelopes in sample
+    /// units (32768 = full scale), and the snapshot counter (wrapping). Zero
+    /// before stage 3.
+    pub levels: [[u16; 10]; 2],
     pub level_snaps: u8,
 }
 
@@ -90,9 +91,10 @@ impl Mp3Status {
     pub fn framed(&self) -> bool {
         self.version >= 6
     }
-    /// A band's level in dBFS (peak), floored at -90.
-    pub fn level_db(&self, band: usize) -> f64 {
-        20.0 * (self.levels[band].max(1) as f64 / 32768.0)
+    /// A band's level in dBFS (peak) for channel 0 (left) or 1 (right),
+    /// floored at -90.
+    pub fn level_db(&self, ch: usize, band: usize) -> f64 {
+        20.0 * (self.levels[ch][band].max(1) as f64 / 32768.0)
             .log10()
             .max(-4.5)
     }
@@ -151,14 +153,17 @@ impl Board {
             host_paused: m6 && s[66] & 4 != 0,
             eq_on: m6 && s[66] & 2 != 0,
             eq_bank: m6 && s[66] & 1 != 0,
-            levels: std::array::from_fn(|b| {
-                if m6 {
-                    u16::from_le_bytes([s[68 + 2 * b], s[69 + 2 * b]])
-                } else {
-                    0
-                }
+            levels: std::array::from_fn(|c| {
+                std::array::from_fn(|b| {
+                    let i = 68 + 20 * c + 2 * b;
+                    if m6 {
+                        u16::from_le_bytes([s[i], s[i + 1]])
+                    } else {
+                        0
+                    }
+                })
             }),
-            level_snaps: if m6 { s[88] } else { 0 },
+            level_snaps: if m6 { s[108] } else { 0 },
         })
     }
 

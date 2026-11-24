@@ -452,9 +452,13 @@ fn eq_play_rest(
                     if let Ok(s) = b.mp3_status() {
                         let line: String = (0..10)
                             .map(|i| {
-                                let v =
-                                    ((s.level_db(i) + 60.0) / 60.0 * 8.0).clamp(0.0, 7.0) as usize;
-                                format!("{}{} ", BARS[v], BARS[v])
+                                // left then right, per band
+                                let bar = |c: usize| {
+                                    let v =
+                                        ((s.level_db(c, i) + 60.0) / 60.0 * 8.0).clamp(0.0, 7.0);
+                                    BARS[v as usize]
+                                };
+                                format!("{}{} ", bar(0), bar(1))
                             })
                             .collect();
                         print!("\r  31 Hz {line}16 kHz   ");

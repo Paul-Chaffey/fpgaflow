@@ -249,12 +249,13 @@ pub struct Equalizer {
     pub ch: [[Biquad; 11]; 2],
     pub on: bool,
     pub set: [[i64; 5]; 10],
-    /// Stage 3: the analyser's band-pass sections and peak envelopes.
-    pub an: [Biquad; 10],
-    pub env: [i64; 10],
+    /// Stage 3: the analyser's band-pass sections and peak envelopes,
+    /// per channel ([left, right]) and band.
+    pub an: [[Biquad; 10]; 2],
+    pub env: [[i64; 10]; 2],
     /// The last snapshot of the envelopes (16-bit, sample units) and how
     /// many snapshots there have been (wrapping), as the status carries them.
-    pub levels: [u16; 10],
+    pub levels: [[u16; 10]; 2],
     pub snaps: u8,
     samples: u64,
 }
@@ -265,9 +266,9 @@ impl Default for Equalizer {
             ch: [[Biquad::default(); 11]; 2],
             on: false,
             set: [[1 << COEF_FRAC, 0, 0, 0, 0]; 10],
-            an: [Biquad::default(); 10],
-            env: [0; 10],
-            levels: [0; 10],
+            an: [[Biquad::default(); 10]; 2],
+            env: [[0; 10]; 2],
+            levels: [[0; 10]; 2],
             snaps: 0,
             samples: 0,
         }
@@ -319,15 +320,20 @@ impl Equalizer {
         };
         let [a, b] = &mut self.ch;
         let (ol, or) = (one(a, l), one(b, r));
-        // The analyser: each band of the mono sum, then its peak envelope.
-        let m = ((ol as i64 + or as i64) >> 1) << DATA_FRAC;
-        for (i, bq) in self.an.iter_mut().enumerate() {
-            let y = bq.step(&bpf_coefs(rate, i), m).abs();
-            self.env[i] = y.max(self.env[i] - (self.env[i] >> RELEASE));
+        // The analyser: each band of each channel, then its peak envelope.
+        for (c, x) in [ol, or].into_iter().enumerate() {
+            let x = (x as i64) << DATA_FRAC;
+            for i in 0..10 {
+                let y = self.an[c][i].step(&bpf_coefs(rate, i), x).abs();
+                let e = &mut self.env[c][i];
+                *e = y.max(*e - (*e >> RELEASE));
+            }
         }
         self.samples += 1;
         if self.samples.is_multiple_of(SNAP) {
-            self.levels = self.env.map(|e| (e >> DATA_FRAC).min(0xffff) as u16);
+            self.levels = self
+                .env
+                .map(|ch| ch.map(|e| (e >> DATA_FRAC).min(0xffff) as u16));
             self.snaps = self.snaps.wrapping_add(1);
         }
         (ol, or)
@@ -337,7 +343,7 @@ impl Equalizer {
     fn snapshot_line(&self) -> Option<String> {
         (self.samples.is_multiple_of(SNAP)).then(|| {
             let mut s = format!("L {}", self.snaps);
-            for v in self.levels {
+            for v in self.levels.iter().flatten() {
                 s.push_str(&format!(" {v}"));
             }
             s.push('\n');
@@ -348,7 +354,7 @@ impl Equalizer {
 
 /// Test vectors for the RTL (`tb_eq`). Lines are either
 /// `S rate level in_l in_r out_l out_r` (a sample),
-/// `L snaps l0 .. l9` (the analyser's snapshot just taken, after that sample) or
+/// `L snaps l0 .. l9 r0 .. r9` (the analyser's snapshot just taken, after that sample) or
 /// `C on c0 .. c49` (from the next sample: EQ on/off and, if on, a new set):
 /// first the bass boost alone at every rate and level, with saturating
 /// bursts, then EQ curves changing while a 20 Hz-20 kHz sweep and noise play.
@@ -509,20 +515,22 @@ mod tests {
 
     #[test]
     fn the_analyser_sees_a_tone_in_its_band() {
-        // A 1 kHz tone at -6 dBFS lights band 5 (1 kHz) near -6 dB and the
-        // others well below.
+        // A 1 kHz tone at -6 dBFS on the left only lights the left band 5
+        // (1 kHz) near -6 dB, the other bands well below, the right nothing.
         let mut eq = Equalizer::default();
         for n in 0..44100 {
             let x = (16384.0 * (2.0 * PI * 1000.0 * n as f64 / 44100.0).sin()).round() as i16;
-            eq.step(0, 0, x, x);
+            eq.step(0, 0, x, 0);
         }
         let db = |v: u16| 20.0 * (v.max(1) as f64 / 32768.0).log10();
-        assert!((db(eq.levels[5]) + 6.0).abs() < 0.5, "{}", db(eq.levels[5]));
-        for (i, v) in eq.levels.iter().enumerate() {
+        let left = eq.levels[0];
+        assert!((db(left[5]) + 6.0).abs() < 0.5, "{}", db(left[5]));
+        for (i, v) in left.iter().enumerate() {
             if i != 5 {
-                assert!(db(*v) < db(eq.levels[5]) - 9.0, "band {i}: {}", db(*v));
+                assert!(db(*v) < db(left[5]) - 9.0, "band {i}: {}", db(*v));
             }
         }
+        assert_eq!(eq.levels[1], [0; 10]);
         // The 16 kHz band is silent at 32 kHz (above Nyquist).
         assert_eq!(bpf_coefs(2, 9), [0; 5]);
     }
