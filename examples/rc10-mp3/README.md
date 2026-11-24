@@ -11,6 +11,13 @@ fpgaflow-celoxica load examples/rc10-mp3/build/impl/mp3_top.bit
 fpgaflow-celoxica play song.mp3      # anything else is converted to MP3 by ffmpeg
 ```
 
+`play` checks which design is loaded: with this one, an MPEG-1 Layer III
+file is sent as it is (a leading ID3v2 tag is skipped); anything else (WAV,
+FLAC, MPEG-2/2.5 "LSF" MP3s at 8-24 kHz, ...) is converted by ffmpeg with
+LAME to 192 kbit/s MPEG-1 at 44.1 kHz on the way. The decoder resynchronises
+after damage: a header counts only when the next one follows where its
+length says.
+
 Joystick: up/down = volume (16 steps of 3 dB, shown on the display), left/
 right = DAC coding (NRZ or return-to-zero, LED 1), centre = pause (the dot).
 
@@ -132,8 +139,10 @@ goes; `mp3-play FILE` only plays. Status bytes 50-62 add the PCM count and
 CRC, underruns, the PCM FIFO fill, the controls and the playing rate
 (`rtl/mp3_top.sv`).
 
-Results: the 18 vector streams (5160 frames, 10.3 million samples) match the
-model on the board and in simulation; 6.9k slices (51%), 31 of 32 block
-RAMs, 14 multipliers; 48 MHz with ~0.5 ns to spare. Simulation now takes a few hours
-for the full set (`build/vectors/list.txt` can name a subset; the IMDCT and
-synthesis are most of it).
+Results: the 18 vector streams (5160 frames, 9.9 million PCM samples) match
+the model in simulation and on the board, as do the 45 generated test
+streams and a full 4:16 track (PCM CRCs, played in real time with no
+underruns); 7.0k slices (52%), 31 of 32 block RAMs, 14 multipliers; 48 MHz
+with 0.75 ns to spare. Simulation now takes 1.5 hours for the full set
+(`build/vectors/list.txt` can name a subset; the IMDCT and synthesis are
+most of it).

@@ -183,6 +183,11 @@ MHz and the DCMs) or resampling; that is decided in milestone 6.
 **Status 2026-11-24:** milestones 0-5 done: the 18 vector streams decode
 bit-exact on the board (PCM CRCs), at 32, 44.1 and 48 kHz (the DAC clock is a
 BUFGMUX of clock A and the 48 MHz, chosen per stream). `play` sends MP3s raw.
+Milestone 6: resync after damage (the `damaged` stream), ID3v2 skipped by the
+host, timing met with 0.75 ns to spare, README; long runs: 46 streams on the
+board (45 generated, a full 4:16 track) with zero mismatches. MPEG-2 LSF is
+left out of the hardware: the front end ignores MPEG-2 headers, and `play`
+converts such files (and anything not MPEG-1 Layer III) with ffmpeg/LAME.
 
 ## Risks
 
