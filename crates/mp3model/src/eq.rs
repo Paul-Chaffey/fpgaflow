@@ -126,21 +126,23 @@ impl BassBoost {
     }
 }
 
-/// Test vectors for the RTL: lines `rate level in_l in_r out_l out_r`.
-/// Every rate and level in turn (with the state carried across changes, as
-/// on the board): a sweep on the left, noise on the right, bursts of a
-/// full-scale 40 Hz square (to exercise saturation).
-pub fn vectors(per_setting: usize) -> String {
-    let mut eq = BassBoost::default();
-    let mut out = String::new();
+/// The stage-1 test sequence, through `eq` (EQ off: the bass boost alone):
+/// every rate and level in turn, the state carried across changes as on the
+/// board; a sweep on the left, noise on the right, bursts of a full-scale
+/// 40 Hz square (saturation). Lines `S rate level in_l in_r out_l out_r`.
+fn bass_sequence(eq: &mut Equalizer, per_setting: usize, out: &mut String) {
     let mut seed: u32 = 1;
     let mut n = 0usize;
-    for rate in 0..3 {
-        let fs = RATES[rate];
+    eq.on = false;
+    out.push_str("C 0");
+    for v in eq.set.iter().flatten() {
+        out.push_str(&format!(" {v}"));
+    }
+    out.push('\n');
+    for (rate, fs) in RATES.iter().enumerate() {
         for level in [0, 1, 2, 3, 2, 0, 3] {
             for i in 0..per_setting {
                 let t = n as f64 / fs;
-                // Exponential sweep 20 Hz -> 2 kHz over each setting, -6 dBFS.
                 let p = i as f64 / per_setting as f64;
                 let f = 20.0 * 100f64.powf(p);
                 let l = if (i / 700) % 4 == 3 {
@@ -156,7 +158,169 @@ pub fn vectors(per_setting: usize) -> String {
                 let r = ((seed >> 16) as i32 & 0x3fff) - 0x2000;
                 let (l, r) = (l as i16, r as i16);
                 let (ol, or) = eq.step(rate, level, l, r);
-                out.push_str(&format!("{rate} {level} {l} {r} {ol} {or}\n"));
+                out.push_str(&format!("S {rate} {level} {l} {r} {ol} {or}\n"));
+                n += 1;
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- stage 2
+
+/// Graphic equaliser band centres (octaves).
+pub const BANDS: [f64; 10] = [
+    31.25, 62.5, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0,
+];
+/// One-octave bandwidth.
+pub const BAND_Q: f64 = std::f64::consts::SQRT_2;
+/// Band gain limit, dB.
+pub const BAND_DB: f64 = 12.0;
+/// Bytes of a coefficient set on the wire: 10 bands x 5 terms x 4 bytes LE.
+pub const SET_BYTES: usize = 10 * 5 * 4;
+
+/// Normalised peaking filter `[b0, b1, b2, a1, a2]` (RBJ cookbook).
+pub fn peaking(fs: f64, f0: f64, q: f64, gain_db: f64) -> [f64; 5] {
+    let a = 10f64.powf(gain_db / 40.0);
+    let w = 2.0 * PI * f0 / fs;
+    let (c, al) = (w.cos(), w.sin() / (2.0 * q));
+    let a0 = 1.0 + al / a;
+    [
+        (1.0 + al * a) / a0,
+        -2.0 * c / a0,
+        (1.0 - al * a) / a0,
+        -2.0 * c / a0,
+        (1.0 - al / a) / a0,
+    ]
+}
+
+const IDENTITY: [f64; 5] = [1.0, 0.0, 0.0, 0.0, 0.0];
+
+/// The 10 bands' filters for `gains` (dB, clamped to +-[`BAND_DB`]) at rate
+/// index `rate`, with automatic headroom: if the combined response rises
+/// above 0 dB anywhere (20 Hz to Nyquist), band 0's b's are scaled down by
+/// that peak. A band at 0 dB, or above 0.45 fs, is the identity.
+pub fn eq_design(rate: usize, gains: &[f64; 10]) -> [[f64; 5]; 10] {
+    let fs = RATES[rate];
+    let mut c = [IDENTITY; 10];
+    for (i, g) in gains.iter().enumerate() {
+        let g = g.clamp(-BAND_DB, BAND_DB);
+        if g != 0.0 && BANDS[i] < 0.45 * fs {
+            c[i] = peaking(fs, BANDS[i], BAND_Q, g);
+        }
+    }
+    let mut peak = f64::MIN;
+    let mut f = 20.0;
+    while f < fs / 2.0 {
+        let db: f64 = c.iter().map(|b| response_db(b, f, fs)).sum();
+        peak = peak.max(db);
+        f *= 1.01;
+    }
+    if peak > 0.0 {
+        let h = 10f64.powf(-peak / 20.0);
+        for v in &mut c[0][..3] {
+            *v *= h;
+        }
+    }
+    c
+}
+
+/// Quantised coefficient set for the hardware (MAC form, Q2.23).
+pub fn eq_coefs(rate: usize, gains: &[f64; 10]) -> [[i64; 5]; 10] {
+    eq_design(rate, gains).map(|c| quantize(&c))
+}
+
+/// A coefficient set as the USB record carries it (record type 1).
+pub fn set_bytes(set: &[[i64; 5]; 10]) -> Vec<u8> {
+    set.iter()
+        .flatten()
+        .flat_map(|v| (*v as i32).to_le_bytes())
+        .collect()
+}
+
+/// The full tone control as the RC10 runs it: per channel the bass shelf
+/// (section 0, from the built-in table), then, while the EQ is on, the 10
+/// bands (sections 1-10) with host-loaded coefficients. Off, it is exactly
+/// [`BassBoost`].
+#[derive(Debug, Clone)]
+pub struct Equalizer {
+    pub ch: [[Biquad; 11]; 2],
+    pub on: bool,
+    pub set: [[i64; 5]; 10],
+}
+
+impl Default for Equalizer {
+    fn default() -> Self {
+        Equalizer {
+            ch: [[Biquad::default(); 11]; 2],
+            on: false,
+            set: [[1 << COEF_FRAC, 0, 0, 0, 0]; 10],
+        }
+    }
+}
+
+impl Equalizer {
+    pub fn step(&mut self, rate: usize, level: usize, l: i16, r: i16) -> (i16, i16) {
+        let bass = bass_coefs(rate, level);
+        let (on, set) = (self.on, self.set);
+        let one = |st: &mut [Biquad; 11], s: i16| {
+            let mut x = (s as i64) << DATA_FRAC;
+            x = st[0].step(&bass, x);
+            if on {
+                for (bq, c) in st[1..].iter_mut().zip(set.iter()) {
+                    x = bq.step(c, x);
+                }
+            }
+            sat((x + (1 << (DATA_FRAC - 1))) >> DATA_FRAC, 16) as i16
+        };
+        let [a, b] = &mut self.ch;
+        (one(a, l), one(b, r))
+    }
+}
+
+/// Test vectors for the RTL (`tb_eq`). Lines are either
+/// `S rate level in_l in_r out_l out_r` (a sample) or
+/// `C on c0 .. c49` (from the next sample: EQ on/off and, if on, a new set):
+/// first the bass boost alone at every rate and level, with saturating
+/// bursts, then EQ curves changing while a 20 Hz-20 kHz sweep and noise play.
+pub fn eq_vectors(per_setting: usize) -> String {
+    let mut eq = Equalizer::default();
+    let mut out = String::new();
+    bass_sequence(&mut eq, per_setting, &mut out);
+    let mut seed: u32 = 3;
+    let mut rnd = move || {
+        seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        seed
+    };
+    let curves: [[f64; 10]; 4] = [
+        [12.0, 9.0, 6.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        [-12.0, -6.0, 0.0, 6.0, 12.0, 12.0, 6.0, 0.0, -6.0, -12.0],
+        [0.0, 0.0, 0.0, -3.0, -6.0, -6.0, -3.0, 3.0, 9.0, 12.0],
+        [12.0; 10],
+    ];
+    let mut n = 0usize;
+    for rate in 0..3 {
+        let fs = RATES[rate];
+        for (step, curve) in curves.iter().enumerate() {
+            let on = step != 2 || rate != 1; // one stretch with the EQ off
+            eq.on = on;
+            if on {
+                eq.set = eq_coefs(rate, curve);
+            }
+            out.push_str(&format!("C {}", on as u8));
+            for v in eq.set.iter().flatten() {
+                out.push_str(&format!(" {v}"));
+            }
+            out.push('\n');
+            let level = step % 4;
+            for i in 0..per_setting {
+                let t = n as f64 / fs;
+                let p = i as f64 / per_setting as f64;
+                let f = 20.0 * 1000f64.powf(p); // 20 Hz .. 20 kHz
+                let l = (16384.0 * (2.0 * PI * f * t).sin()).round() as i32;
+                let r = ((rnd() >> 16) as i32 & 0x7fff) - 0x4000;
+                let (l, r) = (l as i16, r as i16);
+                let (ol, or) = eq.step(rate, level, l, r);
+                out.push_str(&format!("S {rate} {level} {l} {r} {ol} {or}\n"));
                 n += 1;
             }
         }
@@ -221,5 +385,52 @@ mod tests {
         }
         let db = 20.0 * (peak as f64 / 16000.0).log10();
         assert!((db + 12.0).abs() < 0.2, "{db}");
+    }
+
+    #[test]
+    fn eq_bands_match_the_design_and_never_clip() {
+        let curves = [
+            [12.0; 10],
+            [-12.0; 10],
+            [
+                12.0, -12.0, 12.0, -12.0, 12.0, -12.0, 12.0, -12.0, 12.0, -12.0,
+            ],
+        ];
+        for rate in 0..3 {
+            let fs = RATES[rate];
+            for g in curves {
+                let d = eq_design(rate, &g);
+                let q = eq_coefs(rate, &g).map(|c| dequantize(&c));
+                let mut f = 20.0;
+                while f < fs / 2.0 {
+                    let a: f64 = d.iter().map(|c| response_db(c, f, fs)).sum();
+                    let b: f64 = q.iter().map(|c| response_db(c, f, fs)).sum();
+                    assert!((a - b).abs() < 0.15, "rate {rate} {f} Hz: {a} vs {b}");
+                    assert!(a < 0.01, "rate {rate} {f} Hz: {a} dB (headroom)");
+                    f *= 1.1;
+                }
+            }
+        }
+        // One band up 12 dB: its centre is the 0 dB peak, 1 kHz is 12 dB lower.
+        let mut g = [0.0; 10];
+        g[0] = 12.0;
+        let d = eq_design(0, &g);
+        let at = |f: f64| d.iter().map(|c| response_db(c, f, 44100.0)).sum::<f64>();
+        assert!(
+            at(31.25).abs() < 0.05 && (at(1000.0) + 12.0).abs() < 0.3,
+            "{} {}",
+            at(31.25),
+            at(1000.0)
+        );
+    }
+
+    #[test]
+    fn eq_off_is_the_bass_boost() {
+        let (mut a, mut b) = (Equalizer::default(), BassBoost::default());
+        for n in 0..3000 {
+            let x = ((n * 7919) % 65536) as i16;
+            assert_eq!(a.step(1, 2, x, -x), b.step(1, 2, x, -x));
+        }
+        assert_eq!(set_bytes(&eq_coefs(0, &[0.0; 10])).len(), SET_BYTES);
     }
 }

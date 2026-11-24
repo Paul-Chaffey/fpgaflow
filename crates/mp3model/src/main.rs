@@ -8,7 +8,7 @@
 //!   mp3model frontend IN OUT         decoder vectors: OUT.mp3 (as sent), OUT.model.txt
 //!                                    (frame records), OUT.gran.txt (granule records)
 //!   mp3model rtl-tables DIR          generated RTL tables (DIR/huff_rom.sv)
-//!   mp3model eq-vectors OUT          bass-boost test vectors for tb_eq
+//!   mp3model eq-vectors OUT          tone-control test vectors for tb_eq
 //!   mp3model fixed W I C M FILES     fixed-point back end vs the float model
 
 use std::process::{Command, ExitCode};
@@ -32,7 +32,7 @@ fn main() -> ExitCode {
         ["frontend", input, out] => frontend(input, out),
         ["rtl-tables", dir] => rtl_tables(dir),
         ["eq-vectors", out] => {
-            std::fs::write(out, fpgaflow_mp3model::eq::vectors(3000)).map_err(Into::into)
+            std::fs::write(out, fpgaflow_mp3model::eq::eq_vectors(2500)).map_err(Into::into)
         }
         ["fixed", w, i, c, m, ref inputs @ ..] if !inputs.is_empty() => {
             match (w.parse(), i.parse(), c.parse(), m.parse()) {
