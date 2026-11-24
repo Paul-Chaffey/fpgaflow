@@ -489,12 +489,17 @@ impl App {
                 self.step(1);
             }
             ui.add_space(12.0);
+            // The song's column takes the rest of the bar, whatever the title;
+            // its last row is the position slider with the volume beside it,
+            // shown (greyed) before a track plays too, so nothing moves.
+            let col_w = ui.available_width().max(360.0);
             ui.vertical(|ui| {
+                ui.set_width(col_w);
                 let title = self
                     .current
                     .map(|i| self.song_name(i))
                     .unwrap_or_else(|| "—".into());
-                ui.label(RichText::new(title).size(18.0).strong());
+                ui.add(egui::Label::new(RichText::new(title).size(18.0).strong()).truncate());
                 // The board's sample count restarts with each stream; until it
                 // has, the new stream hasn't begun playing.
                 if let (Some(seen), Some(s)) = (self.await_reset, &st) {
@@ -524,27 +529,29 @@ impl App {
                 if self.converted && self.state != State::Stopped {
                     line.push_str("   converted by ffmpeg");
                 }
-                ui.label(line);
-                if let Some(d) = self.duration {
+                ui.add(egui::Label::new(line).truncate());
+                ui.horizontal(|ui| {
                     // The position: drag (or click) to jump there.
+                    let d = self.duration.unwrap_or(0.0);
                     let mut v = self.seek_drag.unwrap_or(elapsed.min(d));
-                    ui.spacing_mut().slider_width = 420.0;
+                    ui.spacing_mut().slider_width = (col_w - 300.0).max(160.0);
                     let r = ui
-                        .add(egui::Slider::new(&mut v, 0.0..=d).show_value(false))
+                        .add_enabled(
+                            self.duration.is_some(),
+                            egui::Slider::new(&mut v, 0.0..=d.max(0.001)).show_value(false),
+                        )
                         .on_hover_text("Drag to move through the song");
                     if r.dragged() {
                         self.seek_drag = Some(v);
                     } else {
-                        if r.drag_stopped() || r.changed() {
+                        if self.duration.is_some() && (r.drag_stopped() || r.changed()) {
                             self.seek(v);
                         }
                         self.seek_drag = None;
                     }
-                }
-            });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_space(8.0);
-                self.volume(ui, st.as_ref());
+                    ui.add_space(24.0);
+                    self.volume(ui, st.as_ref());
+                });
             });
         });
     }
@@ -558,9 +565,9 @@ impl App {
             }
         }
         let mut v = self.vol_pending.map(|(v, _)| v).or(board).unwrap_or(0);
-        ui.vertical(|ui| {
+        ui.horizontal(|ui| {
             ui.label(RichText::new("Volume").strong());
-            ui.spacing_mut().slider_width = 180.0;
+            ui.spacing_mut().slider_width = 150.0;
             let r = ui
                 .add_enabled(
                     board.is_some(),
@@ -730,7 +737,8 @@ impl App {
 
     /// Live band levels (stage 3), as a classic LED meter: per band a left
     /// and a right column of segments, -60..0 dBFS in 2.5 dB steps, green up
-    /// to -12 dB, amber to -3 dB, red above; unlit segments glow dimly, and a
+    /// to -18 dB, amber to -9 dB, red above (a band rarely nears full scale on
+    /// its own); unlit segments glow dimly, and a
     /// peak segment holds for a second, then falls 30 dB/s.
     #[allow(clippy::needless_range_loop)] // (c indexes the status and the peaks)
     fn levels(&mut self, ui: &mut egui::Ui, st: Option<&Mp3Status>) {
@@ -762,9 +770,9 @@ impl App {
             );
         }
         let colour = |top_db: f64| {
-            if top_db > -3.0 {
+            if top_db > -9.0 {
                 Color32::from_rgb(255, 64, 48)
-            } else if top_db > -12.0 {
+            } else if top_db > -18.0 {
                 Color32::from_rgb(255, 184, 32)
             } else {
                 Color32::from_rgb(48, 220, 96)
