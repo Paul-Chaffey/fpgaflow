@@ -25,6 +25,10 @@ module mp3_granule (
     input  logic [7:0]   res_rdata,
     output logic         rec_valid,
     output logic [7:0]   rec_data,
+    input  logic         rec_ready,      // the next stage can take a record
+    output logic [31:0]  rec_hdr,        // the record's frame header, side info, channel
+    output logic [73:0]  rec_ent,
+    output logic         rec_ch,
     output logic [31:0]  granules,
     output logic [31:0]  crc
 );
@@ -197,6 +201,9 @@ module mp3_granule (
     endfunction
 
     assign fd_ready = st == G_IDLE;
+    assign rec_hdr = hdr;
+    assign rec_ent = ent;
+    assign rec_ch = ch;
 
     // Scale factor completion and its write.
     wire sf_done = st == G_SF && (reuse || nb == 0 || k == nb);
@@ -421,7 +428,7 @@ module mp3_granule (
                     i <= i + 1'b1;
                 end
             // ---- record: scale factors, then the values (16-bit LE)
-            G_EMIT_SF: begin
+            G_EMIT_SF: if (ek != 0 || rec_ready) begin
                 rec_valid <= 1'b1;
                 rec_data <= 8'(sf_r);
                 crc_r <= crc_byte(crc_r, 8'(sf_r));

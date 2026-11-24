@@ -317,11 +317,13 @@ struct FrontEndStatus {
     idle: bool,
     granules: u32,
     granule_crc: u32,
+    spectra: u32,
+    spectra_crc: u32,
 }
 
 fn front_end_status(b: &Board) -> Result<FrontEndStatus, Error> {
     let s = b.usb_read(64, Duration::from_secs(2))?;
-    if &s[0..2] != b"M2" {
+    if &s[0..2] != b"M3" {
         return Err(Error::Other(
             "the RC10 isn't running the MP3 front end: load \
              examples/rc10-mp3/build/impl/mp3_top.bit first"
@@ -339,6 +341,8 @@ fn front_end_status(b: &Board) -> Result<FrontEndStatus, Error> {
         idle: s[25] & 0x80 != 0,
         granules: u32_at(26),
         granule_crc: u32_at(30),
+        spectra: u32_at(34),
+        spectra_crc: u32_at(38),
     })
 }
 
@@ -347,11 +351,12 @@ fn front_end_status(b: &Board) -> Result<FrontEndStatus, Error> {
 /// info, undecodable frames (milestone 1); granules and the CRC over their
 /// scale factors and Huffman values (milestone 2).
 fn mp3_check(file: &str) -> Result<(), Error> {
-    use fpgaflow_mp3model::frontend::{granules, records, strip_id3};
+    use fpgaflow_mp3model::frontend::{granules, records, spectra, strip_id3};
     let data = std::fs::read(file).map_err(|e| Error::File(file.to_string(), e))?;
     let sent = strip_id3(&data);
     let (_, want) = records(sent);
     let (grans, gcrc) = granules(sent);
+    let (specs, scrc) = spectra(sent);
     let b = open()?;
     // A new stream needs the front end idle (22 ms without bytes).
     let start = Instant::now();
@@ -370,7 +375,10 @@ fn mp3_check(file: &str) -> Result<(), Error> {
     let start = Instant::now();
     let got = loop {
         let s = front_end_status(&b)?;
-        if (s.idle && s.frames == want.frames && s.granules == grans.len() as u32)
+        if (s.idle
+            && s.frames == want.frames
+            && s.granules == grans.len() as u32
+            && s.spectra == specs.len() as u32)
             || start.elapsed() > Duration::from_secs(5)
         {
             break s;
@@ -388,12 +396,22 @@ fn mp3_check(file: &str) -> Result<(), Error> {
         idle: true,
         granules: grans.len() as u32,
         granule_crc: gcrc,
+        spectra: specs.len() as u32,
+        spectra_crc: scrc,
     };
     let show = |s: &FrontEndStatus| {
         format!(
             "{} frames, {} bytes in frames, CRC {:08x}, {} undecodable, last header {:02x?}; \
-             {} granules, CRC {:08x}",
-            s.frames, s.frame_bytes, s.crc, s.undecodable, s.last_header, s.granules, s.granule_crc
+             {} granules, CRC {:08x}; {} spectra, CRC {:08x}",
+            s.frames,
+            s.frame_bytes,
+            s.crc,
+            s.undecodable,
+            s.last_header,
+            s.granules,
+            s.granule_crc,
+            s.spectra,
+            s.spectra_crc
         )
     };
     println!(

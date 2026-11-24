@@ -124,29 +124,52 @@ impl Coefs {
     }
 }
 
+/// Stereo and antialias coefficients in format `f`, exactly as the back end
+/// uses them: (antialias cs, antialias ca, mid/side 1/sqrt(2), intensity
+/// (k_left, k_right) for positions 0..6).
+#[allow(clippy::type_complexity)]
+pub fn coef_tables(f: &Fmt) -> ([i64; 8], [i64; 8], i64, [(i64, i64); 7]) {
+    let k = Coefs::new(f);
+    (k.aa_cs, k.aa_ca, k.ms, k.is_k)
+}
+
 /// |n|^(4/3) as (mantissa with `m` bits, value in [2^(m-1), 2^m), exponent):
 /// value = mant * 2^(exp - (m - 1)).
-fn pow43(n: u32, m: u32) -> (i64, i32) {
-    let norm = |v: f64| -> (i64, i32) {
-        let mut e = v.log2().floor() as i32;
-        let mut mant = (v / 2f64.powi(e) * (1u64 << (m - 1)) as f64).round() as i64;
-        if mant >= 1 << m {
-            mant >>= 1;
-            e += 1;
-        }
-        (mant, e)
-    };
+pub fn pow43(n: u32, m: u32) -> (i64, i32) {
     if n < 1024 {
-        return norm((n as f64).powf(4.0 / 3.0));
+        return pow43_entry(n, m);
     }
-    // Table entries at multiples of 8, each stored as a normalised mantissa;
-    // interpolated in the larger entry's exponent.
-    let t = |k: u32| {
-        let (mant, e) = norm(((8 * k) as f64).powf(4.0 / 3.0));
-        mant as f64 * 2f64.powi(e - (m as i32 - 1))
-    };
-    let (a, b) = (t(n / 8), t(n / 8 + 1));
-    norm(a + (b - a) * (n % 8) as f64 / 8.0)
+    // n = 8k + f: interpolate between 16 k^(4/3) and 16 (k+1)^(4/3), i.e. the
+    // table entries for k and k + 1 with 4 added to their exponents, in
+    // integers: align the larger entry to the smaller's exponent (they
+    // differ by at most 1), add (difference * f + 4) >> 3, renormalise.
+    let (k, f) = (n >> 3, (n & 7) as i64);
+    let (m0, e0) = pow43_entry(k, m);
+    let (m1, e1) = pow43_entry(k + 1, m);
+    let m1 = m1 << (e1 - e0);
+    let mut v = m0 + (((m1 - m0) * f + 4) >> 3);
+    let mut e = e0 + 4;
+    if v >= 1 << m {
+        v = (v + 1) >> 1;
+        e += 1;
+    }
+    (v, e)
+}
+
+/// Table entry for n = 0..1026: n^(4/3) as an `m`-bit normalised mantissa
+/// in [2^(m-1), 2^m) and exponent: n^(4/3) ~ mant * 2^(e - (m - 1)).
+pub fn pow43_entry(n: u32, m: u32) -> (i64, i32) {
+    if n == 0 {
+        return (0, 0);
+    }
+    let v = (n as f64).powf(4.0 / 3.0);
+    let mut e = v.log2().floor() as i32;
+    let mut mant = (v / 2f64.powi(e) * (1u64 << (m - 1)) as f64).round() as i64;
+    if mant >= 1 << m {
+        mant >>= 1;
+        e += 1;
+    }
+    (mant, e)
 }
 
 /// Fixed-point back end with its own overlap and synthesis state.
@@ -159,6 +182,9 @@ pub struct FixedBackend {
     pub clipped: u64,
     /// Largest |fixed - float| after requantise, stereo, antialias, IMDCT, synthesis V.
     pub stage_err: [f64; 5],
+    /// When set, the IMDCT's input (after requantise, stereo, reorder and
+    /// antialias) of each granule and channel, in decoding order.
+    pub hybrid: Option<Vec<[i64; 576]>>,
 }
 
 impl FixedBackend {
@@ -170,6 +196,7 @@ impl FixedBackend {
             v: [[0; 1024]; 2],
             clipped: 0,
             stage_err: [0.0; 5],
+            hybrid: None,
         }
     }
 
@@ -283,6 +310,9 @@ impl FixedBackend {
                 reorder(&g, rate, &mut x);
                 self.antialias(&g, &mut x);
                 self.note(2, &x, &gr[ch].hybrid);
+                if let Some(h) = &mut self.hybrid {
+                    h.push(x);
+                }
                 let sub = self.imdct(&g, &x, ch);
                 self.note(3, &sub, &gr[ch].subband);
                 for t in 0..18 {

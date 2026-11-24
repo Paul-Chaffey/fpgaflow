@@ -11,7 +11,7 @@ mkdir -p "$out"
 : > "$out/list.txt"
 add() {  # NAME FILE
     "$model" frontend "$2" "$out/$1" \
-        | sed -E 's/.*: ([0-9]+) frames, CRC ([0-9a-f]+),.*; ([0-9]+) granules, CRC ([0-9a-f]+)/\1 \2 \3 \4/' > "$out/$1.sum"
+        | sed -E 's/.*: ([0-9]+) frames, CRC ([0-9a-f]+),.*; ([0-9]+) granules, CRC ([0-9a-f]+); ([0-9]+) spectra, CRC ([0-9a-f]+)/\1 \2 \3 \4 \5 \6/' > "$out/$1.sum"
     echo "$1" >> "$out/list.txt"
 }
 for n in compl he_32khz he_44khz he_48khz he_mode hecommon si si_block si_huff sin1k0db; do

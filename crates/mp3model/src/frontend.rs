@@ -213,3 +213,34 @@ pub fn granules(data: &[u8]) -> (Vec<GranuleRecord>, u32) {
     }
     (out, crc.value())
 }
+
+/// The decoder's word lengths (docs/mp3-decoder-plan.md): 26-bit data with 3
+/// integer bits, 18-bit coefficients (17 fraction bits), 18-bit mantissas.
+pub const HW: crate::fixed::Fmt = crate::fixed::Fmt {
+    w: 26,
+    i: 3,
+    c: 19,
+    m: 18,
+};
+
+/// The IMDCT's input for every granule and channel of every decodable
+/// frame, from the fixed-point back end at the hardware's word lengths, with
+/// the CRC-32 over each value as 32-bit little-endian.
+pub fn spectra(data: &[u8]) -> (Vec<[i64; 576]>, u32) {
+    let mut d = crate::Decoder::default();
+    let mut fx = crate::fixed::FixedBackend::new(HW);
+    fx.hybrid = Some(Vec::new());
+    for (pos, h) in find_frames(data) {
+        if let Some(f) = d.decode_frame(&data[pos..pos + h.frame_len()]) {
+            fx.decode(&f);
+        }
+    }
+    let out = fx.hybrid.take().unwrap_or_default();
+    let mut crc = Crc32::default();
+    for g in &out {
+        for v in g {
+            crc.update(&(*v as i32).to_le_bytes());
+        }
+    }
+    (out, crc.value())
+}

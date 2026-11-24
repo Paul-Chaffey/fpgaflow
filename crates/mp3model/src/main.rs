@@ -332,14 +332,26 @@ fn frontend(input: &str, out: &str) -> Result<()> {
         text.push('\n');
     }
     std::fs::write(format!("{out}.gran.txt"), text)?;
+    // Spectra: the IMDCT's input in 26-bit fixed point, one line each.
+    let (spec, scrc) = fpgaflow_mp3model::frontend::spectra(sent);
+    let mut text = String::new();
+    for g in &spec {
+        let vals: Vec<String> = g.iter().map(|v| v.to_string()).collect();
+        text.push_str(&vals.join(" "));
+        text.push('\n');
+    }
+    std::fs::write(format!("{out}.spec.txt"), text)?;
     println!(
-        "{input}: {} frames, CRC {:08x}, {} bytes skipped, {} undecodable; {} granules, CRC {:08x}",
+        "{input}: {} frames, CRC {:08x}, {} bytes skipped, {} undecodable; {} granules, CRC {:08x}; \
+         {} spectra, CRC {:08x}",
         s.frames,
         s.crc,
         s.skipped,
         s.undecodable,
         grans.len(),
-        gcrc
+        gcrc,
+        spec.len(),
+        scrc
     );
     Ok(())
 }
@@ -350,6 +362,10 @@ fn rtl_tables(dir: &str) -> Result<()> {
     std::fs::write(
         format!("{dir}/mp3_tables.sv"),
         fpgaflow_mp3model::rtl::tables_sv(),
+    )?;
+    std::fs::write(
+        format!("{dir}/mp3_spectral_tables.sv"),
+        fpgaflow_mp3model::rtl::spectral_sv(),
     )?;
     let (nodes, _) = fpgaflow_mp3model::rtl::huffman_nodes();
     println!("wrote {p} ({} tree nodes)", nodes.len());

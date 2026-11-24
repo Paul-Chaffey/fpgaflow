@@ -29,8 +29,36 @@ module tb_decoder;
                       .rec_valid, .rec_data, .frames, .frame_bytes, .undecodable,
                       .crc, .last_header, .fill, .res_raddr, .res_rdata,
                       .side, .fd_valid, .fd_ready);
+    logic s_ready, s_valid, rec_ch;
+    logic [7:0] s_data;
+    logic [31:0] rec_hdr, spectra, scrc;
+    logic [73:0] rec_ent;
     mp3_granule gdut (.clk, .new_stream, .side, .fd_valid, .fd_ready, .res_raddr, .res_rdata,
-                      .rec_valid(g_valid), .rec_data(g_data), .granules, .crc(gcrc));
+                      .rec_valid(g_valid), .rec_data(g_data), .rec_ready(s_ready),
+                      .rec_hdr, .rec_ent, .rec_ch, .granules, .crc(gcrc));
+    mp3_spectral sdut (.clk, .new_stream, .in_valid(g_valid), .in_data(g_data), .in_hdr(rec_hdr),
+                       .in_ent(rec_ent), .in_ch(rec_ch), .ready(s_ready),
+                       .spec_valid(s_valid), .spec_data(s_data), .spectra, .crc(scrc));
+
+    // Spectra: 576 values as 32-bit LE each, against the model's .spec.txt.
+    integer sfd, sn = 0, sb_ = 0, serr_shown = 0, want_s;
+    reg [31:0] sw;
+    always @(posedge clk) if (s_valid) begin
+        sw = {s_data, sw[31:8]};
+        sb_ = sb_ + 1;
+        if (sb_ % 4 == 0) begin
+            void'($fscanf(sfd, "%d", want_s));
+            if ($signed(sw) != want_s) begin
+                if (serr_shown < 8) $display("FAIL: spectrum %0d value %0d = %0d, model %0d", sn, sb_ / 4 - 1, $signed(sw), want_s);
+                serr_shown = serr_shown + 1;
+                errors = errors + 1;
+            end
+        end
+        if (sb_ == 2304) begin
+            sb_ = 0;
+            sn = sn + 1;
+        end
+    end
 
     integer errors = 0;
     // Watchdog: where things are, every 100k cycles (on when +watch is given).
@@ -117,9 +145,9 @@ module tb_decoder;
         end
     end
 
-    integer lfd, fd, c, sent, gaps, want_frames, want_grans, cyc;
+    integer lfd, fd, c, sent, gaps, want_frames, want_grans, want_spec, cyc, total_spec = 0;
     reg [8*64-1:0] name;
-    reg [31:0] want_crc, want_gcrc;
+    reg [31:0] want_crc, want_gcrc, want_scrc;
     string path;
     initial begin
         lfd = $fopen({DIR, "list.txt"}, "r");
@@ -133,9 +161,10 @@ module tb_decoder;
             fd  = $fopen({DIR, path, ".mp3"}, "rb");
             mfd = $fopen({DIR, path, ".model.txt"}, "r");
             gfd = $fopen({DIR, path, ".gran.txt"}, "r");
-            gn = 0; gb = 0; gerr_shown = 0;
+            sfd = $fopen({DIR, path, ".spec.txt"}, "r");
+            gn = 0; gb = 0; gerr_shown = 0; sn = 0; sb_ = 0; serr_shown = 0;
             c   = $fopen({DIR, path, ".sum"}, "r");
-            void'($fscanf(c, "%d %h %d %h", want_frames, want_crc, want_grans, want_gcrc));
+            void'($fscanf(c, "%d %h %d %h %d %h", want_frames, want_crc, want_grans, want_gcrc, want_spec, want_scrc));
             $fclose(c);
             nrec = 0; nbyte = 0; sent = 0;
             idle = 0;
@@ -161,22 +190,27 @@ module tb_decoder;
             while (frames < want_frames && cyc < 400000) begin @(posedge clk); cyc = cyc + 1; end
             idle = 1;
             cyc = 0;
-            while (granules < want_grans && cyc < 400000) begin @(posedge clk); cyc = cyc + 1; end
+            while ((granules < want_grans || spectra < want_spec) && cyc < 2000000) begin @(posedge clk); cyc = cyc + 1; end
             repeat (20000) @(posedge clk);
             if (frames !== want_frames || crc !== want_crc || nrec != want_frames
-                || granules !== want_grans || gcrc !== want_gcrc) begin
-                $display("FAIL: %0s: %0d frames (model %0d), CRC %h (model %h); %0d granules (model %0d), CRC %h (model %h)",
-                         path, frames, want_frames, crc, want_crc, granules, want_grans, gcrc, want_gcrc);
+                || granules !== want_grans || gcrc !== want_gcrc || spectra !== want_spec || scrc !== want_scrc) begin
+                $display("FAIL: %0s: %0d frames (model %0d), CRC %h (model %h); %0d granules (model %0d), CRC %h (model %h); %0d spectra (model %0d), CRC %h (model %h)",
+                         path, frames, want_frames, crc, want_crc, granules, want_grans, gcrc, want_gcrc,
+                         spectra, want_spec, scrc, want_scrc);
                 errors = errors + 1;
             end else begin
-                $display("  %0s: %0d frames, %0d granules, CRCs %h %h: match the model", path, frames, granules, crc, gcrc);
+                $display("  %0s: %0d frames, %0d granules, %0d spectra, CRCs %h %h %h: match the model",
+                         path, frames, granules, spectra, crc, gcrc, scrc);
             end
+            total_spec = total_spec + spectra;
             $fclose(gfd);
+            $fclose(sfd);
             total_frames = total_frames + frames;
             total_grans = total_grans + granules;
             $fclose(mfd);
         end
-        if (errors == 0) $display("PASS: %0d frames and %0d granules in all streams match the model", total_frames, total_grans);
+        if (errors == 0) $display("PASS: %0d frames, %0d granules and %0d spectra in all streams match the model",
+                                  total_frames, total_grans, total_spec);
         else $display("FAIL: %0d errors", errors);
         $finish;
     end

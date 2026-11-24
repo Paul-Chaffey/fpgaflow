@@ -376,6 +376,12 @@ async fn build_inner(
     }
 
     // 3. Translate, map, place & route, timing.
+    let fixed = ise::fix_edif_for_ise(&s.netlist)?;
+    if fixed > 0 {
+        ctx.note(format!(
+            "netlist: {fixed} fix(es) for ngdbuild (x9 RAM parity ports, identifiers over 255 characters)"
+        ));
+    }
     let ip = ise::plan_implement(project, cfg, &s.netlist, &top)?;
     out.part = Some(ip.part.clone());
     ctx.note(format!("implementation: {top} on {}", ip.part));

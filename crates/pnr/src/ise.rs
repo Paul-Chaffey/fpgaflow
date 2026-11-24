@@ -116,6 +116,76 @@ impl IsePlan {
 
 /// Plan translate, map, place & route and static timing.
 ///
+/// Make Yosys's EDIF acceptable to ngdbuild: x9 block RAM parity ports and
+/// identifiers over 255 characters (see `shorten_long_identifiers`).
+///
+/// Yosys writes a one-bit port as a scalar, but ISE's library declares the
+/// parity ports of RAMB16_S9 / RAMB16_S9_Sn (DIP, DOP, DIPA, DIPB, DOPA,
+/// DOPB) as one-bit buses, so ngdbuild reports "Symbol 'RAMB16_S9_S9' is not
+/// supported in target 'spartan3'". Only RAMB16 cells have ports with these
+/// names, and the wider shapes are written as arrays already, so every
+/// scalar declaration of or reference to them is rewritten as a one-element
+/// array. Returns how many were changed.
+pub fn fix_edif_for_ise(path: &Path) -> std::io::Result<usize> {
+    let text = std::fs::read_to_string(path)?;
+    let mut n = 0;
+    let mut out = text.clone();
+    for p in ["DIPA", "DIPB", "DOPA", "DOPB", "DIP", "DOP"] {
+        for dir in ["INPUT", "OUTPUT"] {
+            let from = format!("(port {p} (direction {dir}))");
+            let to = format!("(port (array (rename {p} \"{p}[0:0]\") 1) (direction {dir}))");
+            n += out.matches(&from).count();
+            out = out.replace(&from, &to);
+        }
+        let from = format!("(portRef {p} (instanceRef ");
+        let to = format!("(portRef (member {p} 0) (instanceRef ");
+        n += out.matches(&from).count();
+        out = out.replace(&from, &to);
+    }
+    n += shorten_long_identifiers(&mut out);
+    if n > 0 {
+        std::fs::write(path, out)?;
+    }
+    Ok(n)
+}
+
+/// EDIF identifiers may be at most 255 characters (ngdbuild error 195), but
+/// Yosys's `autoname` can make longer ones in deep logic. Each is replaced
+/// everywhere by a short unique name; where it is defined (instance or net)
+/// the definition keeps a readable original, shortened, as its rename
+/// string, so reports still show the module prefix.
+fn shorten_long_identifiers(text: &mut String) -> usize {
+    static LONG: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"[A-Za-z_][A-Za-z0-9_]{255,}").unwrap());
+    let mut names: Vec<String> = LONG
+        .find_iter(text)
+        .map(|m| m.as_str().to_string())
+        .collect();
+    names.sort();
+    names.dedup();
+    if names.is_empty() {
+        return 0;
+    }
+    // Longest first, so no name is replaced inside a longer one.
+    names.sort_by_key(|n| std::cmp::Reverse(n.len()));
+    for (i, name) in names.iter().enumerate() {
+        let short = format!("fpgaflow_long_{i}");
+        let shown = format!("{}_{i}", &name[..200]);
+        for kw in ["instance", "net"] {
+            *text = text.replace(
+                &format!("({kw} {name}\n"),
+                &format!("({kw} (rename {short} \"{shown}\")\n"),
+            );
+            *text = text.replace(
+                &format!("({kw} {name} "),
+                &format!("({kw} (rename {short} \"{shown}\") "),
+            );
+        }
+        *text = text.replace(name.as_str(), &short);
+    }
+    names.len()
+}
+
 /// The project's constraint files are concatenated into one UCF (ngdbuild
 /// takes a single `-uc`). The stale bitstream is deleted up front so a failed
 /// run can never leave an old `.bit` looking current.
@@ -571,6 +641,50 @@ pub fn parse_pad_report(text: &str) -> Vec<PadRow> {
 /// Pins ISE placed by itself.
 pub fn unlocated(rows: &[PadRow]) -> Vec<&PadRow> {
     rows.iter().filter(|r| r.constraint != "LOCATED").collect()
+}
+
+#[cfg(test)]
+mod edif_tests {
+    #[test]
+    fn parity_ports_become_one_bit_buses() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("t.edf");
+        std::fs::write(
+            &p,
+            "(cell RAMB16_S9_S9 (port DOPA (direction OUTPUT)) (port DIPA (direction INPUT)))\n\
+             (net a (joined (portRef DOPA (instanceRef r1))))\n\
+             (net b (joined (portRef (member DOPA 1) (instanceRef r2))))\n",
+        )
+        .unwrap();
+        assert_eq!(super::fix_edif_for_ise(&p).unwrap(), 3);
+        let t = std::fs::read_to_string(&p).unwrap();
+        assert!(t.contains("(port (array (rename DOPA \"DOPA[0:0]\") 1) (direction OUTPUT))"));
+        assert!(t.contains("(portRef (member DOPA 0) (instanceRef r1))"));
+        assert!(
+            t.contains("(portRef (member DOPA 1) (instanceRef r2))"),
+            "arrays untouched"
+        );
+        assert_eq!(super::fix_edif_for_ise(&p).unwrap(), 0, "idempotent");
+    }
+
+    #[test]
+    fn long_identifiers_are_shortened_consistently() {
+        let long = format!("u_sp.x_{}", "A".repeat(300)).replace('.', "_");
+        let mut t = format!(
+            "(instance {long}\n (viewRef V (cellRef LUT2 (libraryRef LIB))))\n\
+             (net n (joined (portRef I0 (instanceRef {long}))))\n"
+        );
+        assert_eq!(super::shorten_long_identifiers(&mut t), 1);
+        assert!(
+            t.contains("(instance (rename fpgaflow_long_0 \"u_sp_x_AAA"),
+            "{t}"
+        );
+        assert!(t.contains("(instanceRef fpgaflow_long_0)"), "{t}");
+        assert!(!t.contains(&long));
+        assert!(t.lines().all(|l| l
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .all(|w| w.len() <= 255)));
+    }
 }
 
 #[cfg(test)]
