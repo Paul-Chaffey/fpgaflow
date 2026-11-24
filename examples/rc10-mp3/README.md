@@ -19,8 +19,8 @@ after damage: a header counts only when the next one follows where its
 length says.
 
 Joystick: up/down = volume (16 steps of 3 dB, shown on the display for 3 s),
-left/right = DAC coding (NRZ or return-to-zero, LED 1), centre = pause (the
-dot). Otherwise the display shows "M" (drawn across both digits) and "P3" by
+left = DAC coding (NRZ or return-to-zero, LED 1), right = bass boost (b0 off,
+b1 +4, b2 +8, b3 +12 dB, shown for 3 s), centre = pause (the dot). Otherwise the display shows "M" (drawn across both digits) and "P3" by
 turns, a second each.
 
 The decoder is bit-exact with the fixed-point model in `crates/mp3model`
@@ -148,3 +148,24 @@ underruns); 7.0k slices (52%), 31 of 32 block RAMs, 14 multipliers; 48 MHz
 with 0.75 ns to spare. Simulation now takes 1.5 hours for the full set
 (`build/vectors/list.txt` can name a subset; the IMDCT and synthesis are
 most of it).
+
+## Bass boost
+
+`rtl/eq.sv` sits between the PCM FIFO and the volume, on the DAC clock (so
+the decoder's PCM CRCs are untouched). It is a low-shelf biquad per channel
+(RBJ, corner 100 Hz) with automatic headroom: the bass stays at 0 dB and
+everything above it is turned down by the boost, so it can't clip; turn the
+volume up to taste. Level 0 is the identity.
+
+Fixed point, chosen by measurement: 26-bit data (the sample << 8, 2 bits of
+headroom), 25-bit Q2.23 coefficients (Q2.16 missed the 100 Hz shelf by up to
+1.3 dB), first-order error feedback on the rounding (0.005 LSB rms of noise,
+against 0.7 without). One 26 x 25 MAC does both channels in 21 clocks.
+Coefficients for the 3 rates x 4 levels come from `mp3model rtl-tables`
+(`rtl/eq_tables.sv`, kept in LUTs); the golden model is
+`crates/mp3model/src/eq.rs`.
+
+```sh
+target/release/mp3model eq-vectors examples/rc10-mp3/build/eq-vectors.txt
+fpgaflow -C examples/rc10-mp3 sim --tb tb_eq    # 63000 samples, bit-exact
+```

@@ -64,6 +64,9 @@ enum Cmd {
         /// Open the waveform in GTKWave afterwards.
         #[arg(long)]
         waves: bool,
+        /// Run this testbench module instead of [sim] tb_top.
+        #[arg(long, value_name = "MODULE")]
+        tb: Option<String>,
     },
     /// Open the last simulation's waveform in GTKWave.
     Waves {
@@ -212,7 +215,9 @@ fn main() -> Result<()> {
             Ok(())
         }
         Cmd::Lint => flow::lint(&cli.dir, &cfg),
-        Cmd::Sim { tool, waves } => flow::sim(&cli.dir, &cfg, tool.as_deref(), waves),
+        Cmd::Sim { tool, waves, tb } => {
+            flow::sim(&cli.dir, &cfg, tool.as_deref(), waves, tb.as_deref())
+        }
         Cmd::Waves { tool } => flow::waves(&cli.dir, &cfg, tool.as_deref()),
         Cmd::Hier { top } => flow::hier(&cli.dir, &cfg, top),
         Cmd::Synth { family, backend } => {

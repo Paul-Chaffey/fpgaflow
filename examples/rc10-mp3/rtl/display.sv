@@ -5,8 +5,9 @@
 // VOL_MS ms (a press restarts it); otherwise "M" (across both digits: two
 // upside-down U's without their inner lower uprights, so the left digit
 // draws a, b, e, f and the right a, b, c, f) and "P3" take turns, ROT_MS ms
-// each, starting with M. The right
-// digit's dot is lit while paused.
+// each, starting with M. After a right press (bass_key) "b" and the bass
+// level show instead of the volume, for the same time. The right digit's dot
+// is lit while paused.
 module display #(
     parameter int MS     = 48000,   // clocks per millisecond
     parameter int VOL_MS = 3000,
@@ -15,11 +16,13 @@ module display #(
     input  logic       clk,
     input  logic       vol_key,     // a one-cycle pulse per up/down press
     input  logic [3:0] vol,
+    input  logic       bass_key,    // a one-cycle pulse per right press
+    input  logic [1:0] bass,
     input  logic       paused,
     output logic [7:0] seg0,
     output logic [7:0] seg1
 );
-    localparam logic [7:0] M_L = 8'h33, M_R = 8'h27, P = 8'h73, THREE = 8'h4F;
+    localparam logic [7:0] M_L = 8'h33, M_R = 8'h27, P = 8'h73, THREE = 8'h4F, B = 8'h7C;
 
     function automatic logic [7:0] digit(input logic [3:0] v);
         case (v)
@@ -41,8 +44,10 @@ module display #(
     logic [$clog2(VOL_MS + 1)-1:0] vol_left = '0;
     logic [$clog2(ROT_MS)-1:0]     rot_ms = '0;
     logic                          show_p3 = 1'b0;
+    logic                          show_bass = 1'b0;   // (else the volume)
     always_ff @(posedge clk) begin
-        if (vol_key) begin
+        if (vol_key || bass_key) begin
+            show_bass <= bass_key;
             vol_left <= $clog2(VOL_MS + 1)'(VOL_MS);
             rot_ms <= '0;
             show_p3 <= 1'b0;
@@ -59,7 +64,10 @@ module display #(
     end
 
     always_ff @(posedge clk)
-        if (vol_left != '0) begin
+        if (vol_left != '0 && show_bass) begin
+            seg0 <= B;
+            seg1 <= digit({2'b0, bass}) | {paused, 7'b0};
+        end else if (vol_left != '0) begin
             seg0 <= (vol >= 4'd10) ? digit(4'd1) : 8'h00;
             seg1 <= digit((vol >= 4'd10) ? vol - 4'd10 : vol) | {paused, 7'b0};
         end else if (show_p3) begin

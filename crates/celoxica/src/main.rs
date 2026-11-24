@@ -336,6 +336,8 @@ struct FrontEndStatus {
 /// The player's side of the status (not compared with the model).
 struct Mp3PlayerStatus {
     underruns: u16,
+    /// Bass boost level 0..3 (status byte 61 bits 5:4; 0 before the EQ).
+    bass: u8,
 }
 
 fn front_end_status(b: &Board) -> Result<FrontEndStatus, Error> {
@@ -371,6 +373,7 @@ fn mp3_status(b: &Board) -> Result<(FrontEndStatus, Mp3PlayerStatus), Error> {
     };
     let pl = Mp3PlayerStatus {
         underruns: u16::from_le_bytes([s[58], s[59]]),
+        bass: (s[61] >> 4) & 3,
     };
     Ok((fe, pl))
 }
@@ -462,12 +465,13 @@ fn mp3_play_bytes(file: &str, sent: &[u8], monitor: bool) -> Result<(), Error> {
     let (s, p) = mp3_status(&b)?;
     b.normal_mode()?;
     println!(
-        "{} frames, {} samples in {:.1} s; {} undecodable, {} underruns, header {:02x?}",
+        "{} frames, {} samples in {:.1} s; {} undecodable, {} underruns, bass b{}, header {:02x?}",
         s.frames,
         s.samples,
         t.elapsed().as_secs_f64(),
         s.undecodable,
         p.underruns,
+        p.bass,
         s.last_header
     );
     Ok(())

@@ -37,11 +37,12 @@
 //   54-57 CRC-32 of the PCM (16-bit LE, left then right)
 //   58-59 underruns: times playback ran dry and then resumed
 //   60    PCM FIFO fill, 0-255
-//   61    {paused, rz, 2'b0, volume[3:0]}
+//   61    {paused, rz, bass[1:0], volume[3:0]}
 //   62    rate the DACs play at: 0 = 44.1, 1 = 48, 2 = 32 kHz
 //   63    C3
 // Joystick (as the PCM player): up/down = volume in 3 dB steps, left/right =
-// DAC coding (NRZ/RZ), centre = pause. Display: "M" (across both digits) and
+// DAC coding (NRZ/RZ), right = bass boost (rtl/eq.sv: off, +4, +8, +12 dB
+// with automatic headroom), centre = pause. Display: "M" (across both digits) and
 // "P3" by turns, a second each; the volume for 3 s after up/down; dot = paused.
 // LEDs: 0 = idle, 1 = RZ, 4-7 = input buffer fill.
 module mp3_top #(
@@ -141,8 +142,9 @@ module mp3_top #(
     // ---- Controls, and playback events from the audio side
     logic [3:0] vol;
     logic       paused, rz;
-    logic       vol_key;
-    controls #(.MS(MS), .VOL0(VOL0)) u_ctl (.clk, .joy, .vol, .paused, .rz, .vol_key);
+    logic       vol_key, bass_key;
+    logic [1:0] bass;
+    controls #(.MS(MS), .VOL0(VOL0)) u_ctl (.clk, .joy, .vol, .paused, .rz, .vol_key, .bass, .bass_key);
     logic t_resume;                             // audio side: toggles
     logic [2:0] resume_s1 = '0;
     always_ff @(posedge clk) resume_s1 <= {resume_s1[1:0], t_resume};
@@ -169,14 +171,14 @@ module mp3_top #(
     // 32-bit value placed as it is comes out little-endian; the header is
     // reversed so its bytes come out in stream order.
     assign status = {
-        8'hC3, {6'd0, arate_s2}, {paused, rz, 2'b0, vol}, pfill, underruns, pcrc, nsamp,
+        8'hC3, {6'd0, arate_s2}, {paused, rz, bass, vol}, pfill, underruns, pcrc, nsamp,
         bcrc, subs, scrc, spectra, gcrc, granules, {idle, full, 6'd0}, fill8, undecodable,
         last_header[7:0], last_header[15:8], last_header[23:16], last_header[31:24],
         crc, frame_bytes, frames, rx_bytes, 8'h35, 8'h4D
     };
 
     // ---- Display and LEDs
-    display #(.MS(MS)) u_disp (.clk, .vol_key, .vol, .paused, .seg0, .seg1);
+    display #(.MS(MS)) u_disp (.clk, .vol_key, .vol, .bass_key, .bass, .paused, .seg0, .seg1);
     always_ff @(posedge clk) begin
         led[0] <= idle;
         led[1] <= rz;
@@ -186,9 +188,11 @@ module mp3_top #(
 
     // ============================== audio side ==============================
     logic [3:0] vol_s1 = '0, vol_a = '0;
+    logic [1:0] bass_s1 = '0, bass_a = '0;
     logic       rz_s1 = 1'b1, rz_a = 1'b1, paused_s1 = 1'b0, paused_a = 1'b0;
     always_ff @(posedge aclk) begin
         vol_s1 <= vol;       vol_a <= vol_s1;
+        bass_s1 <= bass;     bass_a <= bass_s1;
         rz_s1 <= rz;         rz_a <= rz_s1;
         paused_s1 <= paused; paused_a <= paused_s1;
     end
@@ -229,6 +233,12 @@ module mp3_top #(
             dry <= 1'b1;             // (counted when samples come again)
         end
     assign t_resume = t_resume_r;
+    // Bass boost (after the PCM CRC point: the decoder checks are unchanged).
+    logic re_d = 1'b0;
+    always_ff @(posedge aclk) re_d <= re;
+    logic signed [15:0] eq_l, eq_r;
+    eq u_eq (.clk(aclk), .start(re_d), .rate(arate), .level(bass_a),
+             .in_l(smp_l), .in_r(smp_r), .out_l(eq_l), .out_r(eq_r), .done());
     // Volume (3 dB steps, top step 0.9 of full scale) and the DACs.
     logic [7:0] gain;
     always_comb
@@ -240,8 +250,8 @@ module mp3_top #(
         endcase
     logic signed [25:0] prod_l = '0, prod_r = '0;
     always_ff @(posedge aclk) begin
-        prod_l <= smp_l * $signed({1'b0, gain});
-        prod_r <= smp_r * $signed({1'b0, gain});
+        prod_l <= eq_l * $signed({1'b0, gain});
+        prod_r <= eq_r * $signed({1'b0, gain});
     end
     // RZ swings half as far as NRZ: NRZ plays 6 dB down to match.
     wire signed [15:0] x_l = rz_a ? prod_l[23:8] : prod_l[24:9];

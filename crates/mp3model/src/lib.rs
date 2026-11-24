@@ -10,6 +10,7 @@
 #![allow(clippy::needless_range_loop)]
 
 pub mod bits;
+pub mod eq;
 pub mod fixed;
 pub mod frame;
 pub mod frontend;

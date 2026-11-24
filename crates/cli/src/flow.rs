@@ -102,8 +102,17 @@ pub fn lint(dir: &Path, cfg: &UserConfig) -> Result<()> {
     Ok(())
 }
 
-pub fn sim(dir: &Path, cfg: &UserConfig, tool: Option<&str>, waves: bool) -> Result<()> {
-    let project = Project::find(dir)?;
+pub fn sim(
+    dir: &Path,
+    cfg: &UserConfig,
+    tool: Option<&str>,
+    waves: bool,
+    tb: Option<&str>,
+) -> Result<()> {
+    let mut project = Project::find(dir)?;
+    if let Some(t) = tb {
+        project.file.sim.tb_top = Some(t.to_string());
+    }
     let tool = sim_tool(&project, tool);
     let s = run(|ctx| {
         let project = &project;
